@@ -9,12 +9,15 @@ from rest_framework import status
 from django.shortcuts import redirect
 from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
+import os
+from dotenv import load_dotenv
 from api.models import Order  # Ensure this is your model
 
   # Ensure this is your model
 
 # Replace with your actual secret key in environment for production
-CHAPA_API_KEY = "CHASECK_TEST-FExVyGQAG7MtREiKpjNrzzg5p0WrHSTi"
+load_dotenv()
+CHAPA_API_KEY = os.getenv("CHAPA_API_KEY")
 CHAPA_BASE_URL = "https://api.chapa.co/v1"
 
 class ChapaPaymentInitView(APIView):
@@ -114,14 +117,5 @@ class ChapaCallbackView(APIView):
         return Response({"message": "Payment verification failed"}, status=400)
 
         """
-        examole of input for payment 
-
-        {
-  "order_id": 123,
-  "amount": "500",
-  "email": "user@example.com",
-  "first_name": "John",
-  "last_name": "Doe"
-}
-
+        examole
         """
