@@ -9,7 +9,7 @@ from rest_framework import status
 from django.shortcuts import redirect
 from django.conf import settings
 from rest_framework.permissions import IsAuthenticated
-
+from api.models import Order  # Ensure this is your model
 
   # Ensure this is your model
 
@@ -39,6 +39,7 @@ class ChapaPaymentInitView(APIView):
             "return_url": return_url,
             "customization[title]": "Bamina Order Payment",
             "customization[description]": "Pay for your order.",
+            "custom_data[order_id]": data.get("order_id"), 
         }
 
         headers = {
@@ -98,6 +99,29 @@ class ChapaCallbackView(APIView):
                 status='success',
                 reason=''
             )
+            # If you have an Order model and want to update its status to 'paid'
+            order_id = d.get("custom_data", {}).get("order_id") if d.get("custom_data") else None
+            if order_id:
+              # Adjust import if needed
+                try:
+                    order = Order.objects.get(id=order_id)
+                    order.status = 'paid'
+                    order.save()  # <-- ADD THIS LINE
+                except Order.DoesNotExist:
+                    print("Order not found")
             return Response({"message": "Payment successful"}, status=200)
 
         return Response({"message": "Payment verification failed"}, status=400)
+
+        """
+        examole of input for payment 
+
+        {
+  "order_id": 123,
+  "amount": "500",
+  "email": "user@example.com",
+  "first_name": "John",
+  "last_name": "Doe"
+}
+
+        """
