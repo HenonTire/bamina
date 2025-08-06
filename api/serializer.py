@@ -66,3 +66,14 @@ class OrderSerializer(ModelSerializer):
         fields = ['id', 'user', 'total', 'status', 'shipping_address', 'payment_method', 'items']
         read_only_fields = ['id', 'user', 'total', 'status', 'items']
 
+
+class AdressSerializer(ModelSerializer):
+    class Meta:
+        model = Adress
+        fields = ['id', 'user', 'address', 'created_at']
+        read_only_fields = ['id', 'user', 'created_at']
+    
+    def create(self, validated_data):
+        user = self.context['request'].user
+        validated_data['user'] = user
+        return super().create(validated_data)

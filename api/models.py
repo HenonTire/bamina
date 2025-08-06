@@ -23,7 +23,7 @@ class Products(models.Model):
     price = models.DecimalField(decimal_places=2, max_digits=5)
     discount_price = models.DecimalField(decimal_places=2, max_digits=5, blank=True, null=True)
     size = models.CharField(max_length=30, choices=Size.choices, default=Size.MEDIUM)
-    category = models.CharField(max_length=50, choices=Category, default=Category.POPULAR_PICKS)
+    category = models.CharField(max_length=50, choices=Category, default=Category.POPULAR_PICKS, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
 
@@ -69,7 +69,8 @@ class CartItem(models.Model):
 
 class OrderStatus(models.TextChoices):
     PENDING = 'pending', 'Pending'
-    SHIPPED = 'shipped', 'Shipped'
+    PAID = 'paid', 'Paid'
+    IN_PROCESS = 'in_process', 'In_process'
     DELIVERED = 'delivered', 'Delivered'
     CANCELLED = 'cancelled', 'Cancelled'
 
@@ -77,11 +78,13 @@ class PaymentMethod(models.TextChoices):
     CASH = 'cash', 'Cash on Delivery'
     PAY_HERE = 'pay_here', 'Card Payment'
 class Order(models.Model):
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='shop', blank=True, null=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     total = models.DecimalField(decimal_places=2, max_digits=10)
     status = models.CharField(max_length=100, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     shipping_address = models.TextField(max_length=500)
     payment_method = models.CharField(max_length=50, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
+
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, related_name='items', on_delete=models.CASCADE)
@@ -91,3 +94,11 @@ class OrderItem(models.Model):
 
     def get_total_price(self):
         return self.price * self.quantity
+
+class Adress(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    address = models.TextField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.address}"

@@ -43,10 +43,12 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'rest_framework_simplejwt.token_blacklist',  # Token authentication
     'manager',
-    'payment',  # Ensure this is added if you have a payment app
+    'payment', 
+    'corsheaders', # Ensure this is added if you have a payment app
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",  # Ensure this is added for CORS support
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -158,3 +160,15 @@ FIREBASE_CRED_PATH = os.path.join(BASE_DIR, 'api', 'credentials', 'laba-5ac38-fi
 if not firebase_admin._apps:
     cred = credentials.Certificate(FIREBASE_CRED_PATH)
     firebase_admin.initialize_app(cred)
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",     # React/Vite dev server
+    "http://127.0.0.1:5500",     # plain HTML/JS dev
+    "https://your-frontend-site.com",  # production
+]
+
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [
+    'authorization',
+    'content-type',
+]

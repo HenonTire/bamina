@@ -15,5 +15,12 @@ urlpatterns = [
     path('<str:shop_id>/add-to-cart/', AddToCartView.as_view()),
     path('<str:shop_id>/place-order/', PlaceOrderView.as_view()),
     path('<str:shop_id>/cart-list/', ListCartView.as_view()),
+    path('<str:shop_id>/order-detail/<int:pk>/', OrderDetailView.as_view()),
+    path('<str:shop_id>/order-list/', OrderList.as_view()),
+    path('<str:shop_id>/order-single-product/', OrderSingleProductView.as_view()),
+    path('<str:shop_id>/adress-detail/<int:pk>/', AdressDetailView.as_view()),
+    path('<str:shop_id>/adress-list/', AdreessListView.as_view()),
+    path('<str:shop_id>/create-adress/', AdressCreateView.as_view()),
+
 ]
 

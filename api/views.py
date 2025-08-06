@@ -155,6 +155,8 @@ class AddToCartView(CreateAPIView):
         context['request'] = self.request
         return context
 # import the helper if it's external
+ # assuming you have this function
+
 
 class PlaceOrderView(CreateAPIView):
     serializer_class = OrderSerializer
@@ -163,17 +165,18 @@ class PlaceOrderView(CreateAPIView):
 
     def perform_create(self, serializer):
         request = self.request
-        cart_items = CartItem.objects.filter(user=request.user)
+        shop_id = self.kwargs.get('shop_id')
 
+        # ✅ Validate shop
+        shop = get_object_or_404(Shop, shope_id=shop_id)
+
+        cart_items = CartItem.objects.filter(user=request.user, product__shop=shop)
         if not cart_items.exists():
             raise ValidationError("Your cart is empty")
 
         total_price = sum(item.get_total_price() for item in cart_items)
+        order = serializer.save(user=request.user, total=total_price, shop=shop)
 
-        # Save the order
-        order = serializer.save(user=request.user, total=total_price)
-
-        # Save order items
         for item in cart_items:
             OrderItem.objects.create(
                 order=order,
@@ -182,10 +185,8 @@ class PlaceOrderView(CreateAPIView):
                 price=item.product.price
             )
 
-        # Clear cart
         cart_items.delete()
 
-        # 🔥 Get FCM token from request and send notification
         shop_fcm_token = request.data.get('shop_fcm_token')
         if shop_fcm_token:
             try:
@@ -196,18 +197,100 @@ class PlaceOrderView(CreateAPIView):
                 )
             except Exception as e:
                 print("Failed to send FCM:", str(e))
-        """
-        example of reqeust json data of place order view
-        {
-            "shop_fcm_token": "YOUR_SHOP_FCM_TOKEN,
-            "shipping_address": "123 Main St, City",
-            "payment_method": "cash"
-        """
+
         return order
+
 
 class ListCartView(ListAPIView):
     serializer_class = CartItemSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return CartItem.objects.filter(user=self.request.user)
+        shop_id = self.kwargs.get('shop_id')
+        shop = get_object_or_404(Shop, shope_id=shop_id)
+        return CartItem.objects.filter(user=self.request.user, product__shop=shop)
+
+
+class OrderDetailView(RetrieveUpdateDestroyAPIView):
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'pk'
+
+    def get_object(self):
+        shop_id = self.kwargs.get('shop_id')
+        shop = get_object_or_404(Shop, shope_id=shop_id)
+        return get_object_or_404(Order, pk=self.kwargs.get('pk'), user=self.request.user, shop=shop)
+
+
+class OrderSingleProductView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        shop_id = self.kwargs.get('shop_id')
+        shop = get_object_or_404(Shop, shope_id=shop_id)
+
+        product_id = request.data.get('product_id')
+        product = get_object_or_404(Products, id=product_id, shop=shop)
+
+        shipping_address = request.data.get('shipping_address')
+        payment_method = request.data.get('payment_method')
+        shop_fcm_token = request.data.get('shop_fcm_token')
+
+        order = Order.objects.create(
+            user=request.user,
+            shop=shop,
+            shipping_address=shipping_address,
+            payment_method=payment_method,
+            total=product.price
+        )
+
+        OrderItem.objects.create(order=order, product=product, quantity=1, price=product.price)
+
+        if shop_fcm_token:
+            try:
+                send_fcm_notification(
+                    shop_fcm_token,
+                    "🛒 New Order Placed",
+                    f"{request.user.username} just placed an order with total ${product.price}"
+                )
+            except Exception as e:
+                print("Failed to send FCM:", str(e))
+
+        serializer = ProductSerializer(product)
+        return Response(serializer.data)
+
+
+class OrderList(ListAPIView):
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        shop_id = self.kwargs.get('shop_id')
+        shop = get_object_or_404(Shop, shope_id=shop_id)
+        return Order.objects.filter(user=self.request.user, shop=shop)
+    
+class AdressCreateView(CreateAPIView):
+    serializer_class = AdressSerializer
+    permission_classes = [IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+class AdreessListView(ListAPIView):
+    serializer_class = AdressSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Adress.objects.filter(user=self.request.user)
+    
+class AdressDetailView(RetrieveUpdateDestroyAPIView):
+    serializer_class = AdressSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'pk'
+
+    def get_object(self):
+        return get_object_or_404(Adress, pk=self.kwargs.get('pk'), user=self.request.user)
