@@ -6,6 +6,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
+from rest_framework.exceptions import ValidationError
+from .utils import send_fcm_notification  
 
 class ListProducts(ListAPIView):
     serializer_class = ProductSerializer
@@ -152,7 +154,7 @@ class AddToCartView(CreateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-from rest_framework.exceptions import ValidationError
+# import the helper if it's external
 
 class PlaceOrderView(CreateAPIView):
     serializer_class = OrderSerializer
@@ -160,15 +162,18 @@ class PlaceOrderView(CreateAPIView):
     queryset = Order.objects.all()
 
     def perform_create(self, serializer):
-        cart_items = CartItem.objects.filter(user=self.request.user)
+        request = self.request
+        cart_items = CartItem.objects.filter(user=request.user)
 
         if not cart_items.exists():
             raise ValidationError("Your cart is empty")
 
         total_price = sum(item.get_total_price() for item in cart_items)
 
-        order = serializer.save(user=self.request.user, total=total_price)
+        # Save the order
+        order = serializer.save(user=request.user, total=total_price)
 
+        # Save order items
         for item in cart_items:
             OrderItem.objects.create(
                 order=order,
@@ -177,7 +182,27 @@ class PlaceOrderView(CreateAPIView):
                 price=item.product.price
             )
 
+        # Clear cart
         cart_items.delete()
+
+        # 🔥 Get FCM token from request and send notification
+        shop_fcm_token = request.data.get('shop_fcm_token')
+        if shop_fcm_token:
+            try:
+                send_fcm_notification(
+                    shop_fcm_token,
+                    "🛒 New Order Placed",
+                    f"{request.user.username} just placed an order with total ${total_price}"
+                )
+            except Exception as e:
+                print("Failed to send FCM:", str(e))
+        """
+        example of reqeust json data of place order view
+        {
+            "shop_fcm_token": "YOUR_SHOP_FCM_TOKEN,
+            "shipping_address": "123 Main St, City",
+            "payment_method": "cash"
+        """
         return order
 
 class ListCartView(ListAPIView):

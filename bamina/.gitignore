@@ -1,5 +1,7 @@
 # Created by https://www.gitignore.io
 
+
+/api/credentials/*.json
 ### OSX ###
 .DS_Store
 .AppleDouble

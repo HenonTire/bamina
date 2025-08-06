@@ -11,9 +11,9 @@ class Size(models.TextChoices):
 
 class Category(models.TextChoices):
     POPULAR_PICKS = 'popular_picks', 'Popular Picks'
-    MENS =  "men's", "Men's"
-    WOMENS = "women's", "Women's"
-    KIDS = "kid's", "Kids"
+    BAG =  "bag", "Bag"
+    CLOTHE = "clothe", "Clothe"
+    SHOES = "shoes", "Shoes"
     
 class Products(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE)

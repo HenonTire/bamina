@@ -148,3 +148,13 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
+
+import os
+import firebase_admin
+from firebase_admin import credentials
+
+FIREBASE_CRED_PATH = os.path.join(BASE_DIR, 'api', 'credentials', 'laba-5ac38-firebase-adminsdk-fbsvc-ac9af5a24f.json')
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate(FIREBASE_CRED_PATH)
+    firebase_admin.initialize_app(cred)
