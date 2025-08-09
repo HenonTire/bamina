@@ -16,15 +16,20 @@ from .models import Shop
 from .helper import set_refresh_cookie
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework.permissions import AllowAny
+from rest_framework.exceptions import ValidationError
 
 # ------------------------
 # 1. Register View
 # ------------------------
 class RegisterView(CreateAPIView):
     serializer_class = UserSerializer
+    permission_classes = [AllowAny]
+    
 
     def create(self, request, *args, **kwargs):
         shope_id = kwargs.get('shope_id')
+        
 
         try:
             shop = Shop.objects.get(shope_id=shope_id)
@@ -38,19 +43,21 @@ class RegisterView(CreateAPIView):
 
         refresh = RefreshToken.for_user(user)
         access_token = refresh.access_token
+        # stay_logged_in = request.data.get('stay_logged_in', False).lower() == 'true'
 
         res = Response({
             'id': user.id,
             'access': str(access_token),
         }, status=status.HTTP_201_CREATED)
 
-        return set_refresh_cookie(res, refresh)
+        return set_refresh_cookie(res, refresh, )
 
 
 # ------------------------
 # 2. Custom Login View
 # ------------------------
 class CustomTokenObtainView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request, shope_id):
         username_or_email = request.data.get('username')
         password = request.data.get('password')
@@ -85,6 +92,7 @@ class CustomTokenObtainView(APIView):
 # 3. Google Login View
 # ------------------------
 class GoogleLoginView(APIView):
+    permission_classes = [AllowAny]
     def post(self, request):
         token = request.data.get('token')
         access_token_google = request.data.get('access_token')
@@ -132,13 +140,18 @@ class GoogleLoginView(APIView):
             return Response({'error': 'Invalid Google token', 'details': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 class UpdateUserView(RetrieveUpdateDestroyAPIView):
-
+    permission_classes = [IsAuthenticated]
     serializer_class = UserSerializer
     queryset = User.objects.all()
     lookup_field = 'pk'
     # def get_object(self):
     #     return self.request.user  # Only allow update of the current user
-
+    def get_object(self):
+        shope_id = self.kwargs.get('shope_id')
+        user = self.request.user
+        if user.shop.shope_id != shope_id:
+            raise ValidationError("You do not have permission to update this user.")
+        return user
     def patch(self, request, *args, **kwargs):
         # For partial update, call update with partial=True
         return self.partial_update(request, *args, **kwargs)    

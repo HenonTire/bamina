@@ -166,7 +166,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5500", 
     "http://127.0.0.1:5501",
     "http://localhost:5501",    # plain HTML/JS dev
-    "https://your-frontend-site.com",  # production
+    "https://your-frontend-site.com",
+      # production
 ]
 
 CORS_ALLOW_CREDENTIALS = True
