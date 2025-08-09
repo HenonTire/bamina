@@ -1,3 +1,7 @@
+from rest_framework_simplejwt.views import TokenRefreshView
+from rest_framework_simplejwt.exceptions import TokenError
+from .helper import set_refresh_cookie
+from .models import Shop
 from django.shortcuts import render
 from django.contrib.auth import get_user_model
 from .serializer import UserSerializer
@@ -7,21 +11,20 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.conf import settings
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 User = get_user_model()
-from .models import Shop
-from .helper import set_refresh_cookie
-from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.views import TokenRefreshView
 
 # ------------------------
 # 1. Register View
 # ------------------------
+
+
 class RegisterView(CreateAPIView):
     serializer_class = UserSerializer
+    permission_classes = [AllowAny]
 
     def create(self, request, *args, **kwargs):
         shope_id = kwargs.get('shope_id')
@@ -64,7 +67,8 @@ class CustomTokenObtainView(APIView):
         if not user:
             try:
                 user_obj = User.objects.get(email=username_or_email, shop=shop)
-                user = authenticate(username=user_obj.username, password=password)
+                user = authenticate(
+                    username=user_obj.username, password=password)
             except User.DoesNotExist:
                 pass
 
@@ -131,6 +135,7 @@ class GoogleLoginView(APIView):
         except Exception as e:
             return Response({'error': 'Invalid Google token', 'details': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+
 class UpdateUserView(RetrieveUpdateDestroyAPIView):
 
     serializer_class = UserSerializer
@@ -139,17 +144,16 @@ class UpdateUserView(RetrieveUpdateDestroyAPIView):
     # def get_object(self):
     #     return self.request.user  # Only allow update of the current user
 
-    def patch(self, request, *args, **kwargs):
-        # For partial update, call update with partial=True
-        return self.partial_update(request, *args, **kwargs)    
-    
+    # def patch(self, request, *args, **kwargs):
+    #     # For partial update, call update with partial=True
+    #     return self.partial_update(request, *args, **kwargs)
 
 
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):
-        shope_id = kwargs.get('shope_id') 
+        shope_id = kwargs.get('shope_id')
         refresh_token = request.COOKIES.get('refresh')
 
         if not refresh_token:
@@ -157,15 +161,17 @@ class LogoutView(APIView):
 
         try:
             token = RefreshToken(refresh_token)
-            token.blacklist()  # requires SIMPLE_JWT["BLACKLIST_AFTER_ROTATION"] = True and app installed
+            # requires SIMPLE_JWT["BLACKLIST_AFTER_ROTATION"] = True and app installed
+            token.blacklist()
         except TokenError:
             return Response({'detail': 'Invalid or expired token'}, status=status.HTTP_400_BAD_REQUEST)
 
         # Create empty response and delete cookie
-        response = Response({'detail': 'Logged out successfully'}, status=status.HTTP_200_OK)
+        response = Response(
+            {'detail': 'Logged out successfully'}, status=status.HTTP_200_OK)
         response.delete_cookie('refresh')
         return response
-    
+
 
 class CustomTokenRefreshView(TokenRefreshView):
     """
@@ -173,6 +179,7 @@ class CustomTokenRefreshView(TokenRefreshView):
     """
     # serializer_class = CookieTokenRefreshSerializer
     parmission_classes = [IsAuthenticated]
+
     def post(self, request, *args, **kwargs):
         # Get refresh token from cookies instead of request body
         refresh_token = request.COOKIES.get('refresh')
@@ -189,7 +196,8 @@ class CustomTokenRefreshView(TokenRefreshView):
             new_refresh = str(refresh)  # Keep same if you don't rotate
             # If rotating: refresh.set_jti(), refresh.set_exp() then save
 
-            response = Response({'access': access_token}, status=status.HTTP_200_OK)
+            response = Response({'access': access_token},
+                                status=status.HTTP_200_OK)
 
             # Set (or re-set) refresh token cookie
             response.set_cookie(
@@ -198,7 +206,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                 httponly=True,
                 secure=True,     # Change to False for local dev if needed
                 samesite='Lax',  # Or 'Strict'
-                max_age=60 * 60 * 24 * 60 # 60 days
+                max_age=60 * 60 * 24 * 60  # 60 days
             )
             return response
 
