@@ -1,6 +1,7 @@
 from rest_framework.serializers import ModelSerializer
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 User = get_user_model()
 # user/serializer.py
 class UserSerializer(serializers.ModelSerializer):
@@ -33,8 +34,18 @@ class UserSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
-    def validate_email(self, attrs):
-        email = attrs.get('email')
-        if User.objects.filter(email=email).exists():
-            raise serializers.ValidationError("Email already exists.")
-        return attrs
+    def validate_email(self, value):
+    # value is the email string
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email is already registered.")
+        return value
+
+
+# class CookieTokenRefreshSerializer(TokenRefreshSerializer):
+#     def validate(self, attrs):
+#         request = self.context['request']
+#         refresh = attrs.get('refresh') or request.COOKIES.get('refresh')
+#         if not refresh:
+#             raise self.fail('no_token')
+#         attrs['refresh'] = refresh
+#         return super().validate(attrs)

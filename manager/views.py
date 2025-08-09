@@ -1,5 +1,5 @@
 from django.shortcuts import render
-from .models import Shop
+from .models import Shop, ShopOwner
 from .serializer import ShopeSerializer
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, CreateAPIView, ListAPIView
 from rest_framework.response import Response
@@ -12,8 +12,10 @@ from rest_framework.exceptions import ValidationError
 from django.db import models
 from api.models import Order
 from api.serializer import OrderSerializer
-from django.utils import timezone
-from api.models import OrderStatus
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import authenticate
+from .permission import IsOwnerOfShop
 
 class RegisterShopeView(CreateAPIView):
     queryset = Shop.objects.all()
@@ -22,7 +24,7 @@ class RegisterShopeView(CreateAPIView):
 class CreateProduct(CreateAPIView):
     serializer_class = ProductSerializer
     queryset = Products.objects.all()
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
 
     def perform_create(self, serializer):
@@ -39,7 +41,7 @@ class CreateProduct(CreateAPIView):
         return context
 
 class TotalRevenueView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser,  IsOwnerOfShop]
 
     def get(self, request, shop_id):
         try:
@@ -50,7 +52,7 @@ class TotalRevenueView(APIView):
             raise ValidationError("Shop does not exist.")
 
 class TotalOrderView(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
     def get(self, request, shop_id):
         try:
@@ -61,7 +63,7 @@ class TotalOrderView(APIView):
             raise ValidationError("Shop does not exist.")
 class ListShopProducts(ListAPIView):
     serializer_class = ProductSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
@@ -69,7 +71,7 @@ class ListShopProducts(ListAPIView):
     
 class ProductDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = ProductSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
@@ -85,7 +87,7 @@ class ProductDetailView(RetrieveUpdateDestroyAPIView):
         
 class ListOrderView(ListCreateAPIView):
     serializer_class = OrderSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
@@ -93,7 +95,7 @@ class ListOrderView(ListCreateAPIView):
 
 class OrderDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = OrderSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
@@ -108,7 +110,7 @@ class OrderDetailView(RetrieveUpdateDestroyAPIView):
             raise serializers.ValidationError("Shop does not exist.")
         
 class ListShopUsers(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
     def get(self, request, shop_id):
         try:
@@ -133,7 +135,7 @@ class ListShopUsers(APIView):
             raise ValidationError("Shop does not exist.")
 
 class ShopProductNumByCategory(APIView):
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAdminUser, IsOwnerOfShop]
 
     def get(self, request, shop_id):
         try:
@@ -144,3 +146,26 @@ class ShopProductNumByCategory(APIView):
             raise ValidationError("Shop does not exist.")
         
 
+
+
+
+class AdminLoginView(APIView):
+    def post(self, request):
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        user = authenticate(request, username=username, password=password)
+
+        if user is not None:
+            # Check if this user is a shop owner
+            shop_owner = ShopOwner.objects.filter(user=user).first()
+            if shop_owner:
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    'refresh': str(refresh),
+                    'access': str(refresh.access_token),
+                    'username': user.username,
+                    'shop_id': shop_owner.shop.shope_id  # Send shop_id back
+                })
+
+        return Response({'error': 'Invalid credentials or not admin'}, status=status.HTTP_401_UNAUTHORIZED)
