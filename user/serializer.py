@@ -7,45 +7,36 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password']
+        fields = ['id', 'username', 'email', 'password', 'shop', 'profile_photo']
         read_only_fields = ['id']
         extra_kwargs = {
-            'password': {
-                'write_only': True,
-                'required': False,  # ✅ allow blank in partial update
-                'allow_blank': True,
-            }
+            'password': {'write_only': True, 'required': False, 'allow_blank': True}
         }
 
     def create(self, validated_data):
-        password = validated_data.pop("password")
+        password = validated_data.pop("password", None)
         user = User(**validated_data)
-        user.set_password(password)
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
         user.save()
         return user
 
     def update(self, instance, validated_data):
         instance.username = validated_data.get('username', instance.username)
         instance.email = validated_data.get('email', instance.email)
+        instance.shop = validated_data.get('shop', instance.shop)
 
         password = validated_data.get('password')
-        if password:  # ✅ only update if it's actually passed
+        if password:
             instance.set_password(password)
 
         instance.save()
         return instance
+
     def validate_email(self, value):
-    # value is the email string
-        if User.objects.filter(email=value).exists():
+        user = self.instance
+        if User.objects.filter(email=value).exclude(pk=user.pk if user else None).exists():
             raise serializers.ValidationError("This email is already registered.")
         return value
-
-
-# class CookieTokenRefreshSerializer(TokenRefreshSerializer):
-#     def validate(self, attrs):
-#         request = self.context['request']
-#         refresh = attrs.get('refresh') or request.COOKIES.get('refresh')
-#         if not refresh:
-#             raise self.fail('no_token')
-#         attrs['refresh'] = refresh
-#         return super().validate(attrs)

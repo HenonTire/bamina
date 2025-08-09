@@ -43,7 +43,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'rest_framework_simplejwt.token_blacklist',  # Token authentication
     'manager',
-    'payment', 
+
     'corsheaders', # Ensure this is added if you have a payment app
 ]
 

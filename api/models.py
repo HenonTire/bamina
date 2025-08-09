@@ -74,16 +74,16 @@ class OrderStatus(models.TextChoices):
     DELIVERED = 'delivered', 'Delivered'
     CANCELLED = 'cancelled', 'Cancelled'
 
-class PaymentMethod(models.TextChoices):
-    CASH = 'cash', 'Cash on Delivery'
-    PAY_HERE = 'pay_here', 'Card Payment'
+# class PaymentMethod(models.TextChoices):
+#     CASH = 'cash', 'Cash on Delivery'
+#     PAY_HERE = 'pay_here', 'Card Payment'
 class Order(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='shop', blank=True, null=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     total = models.DecimalField(decimal_places=2, max_digits=10)
     status = models.CharField(max_length=100, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     shipping_address = models.TextField(max_length=500)
-    payment_method = models.CharField(max_length=50, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
+    # payment_method = models.CharField(max_length=50, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
 
 
 class OrderItem(models.Model):

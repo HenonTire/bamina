@@ -16,6 +16,7 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from .permission import IsOwnerOfShop
+from user.helper import set_refresh_cookie
 
 class RegisterShopeView(CreateAPIView):
     queryset = Shop.objects.all()
@@ -85,7 +86,7 @@ class ProductDetailView(RetrieveUpdateDestroyAPIView):
         except Shop.DoesNotExist:
             raise serializers.ValidationError("Shop does not exist.")
         
-class ListOrderView(ListCreateAPIView):
+class ListOrderView(ListAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAdminUser, IsOwnerOfShop]
 
@@ -148,10 +149,9 @@ class ShopProductNumByCategory(APIView):
 
 
 
-
 class AdminLoginView(APIView):
     def post(self, request):
-        username = request.data.get('username')
+        username = request.data.get('email')
         password = request.data.get('password')
 
         user = authenticate(request, username=username, password=password)
@@ -161,11 +161,20 @@ class AdminLoginView(APIView):
             shop_owner = ShopOwner.objects.filter(user=user).first()
             if shop_owner:
                 refresh = RefreshToken.for_user(user)
-                return Response({
-                    'refresh': str(refresh),
+
+                response_data = {
                     'access': str(refresh.access_token),
                     'username': user.username,
-                    'shop_id': shop_owner.shop.shope_id  # Send shop_id back
-                })
+                    'shop_id': shop_owner.shop.shope_id
+                }
 
-        return Response({'error': 'Invalid credentials or not admin'}, status=status.HTTP_401_UNAUTHORIZED)
+                # Create response and attach refresh token as cookie
+                response = Response(response_data, status=status.HTTP_200_OK)
+                set_refresh_cookie(response, refresh)
+
+                return response
+
+        return Response(
+            {'error': 'Invalid credentials or not admin'},
+            status=status.HTTP_401_UNAUTHORIZED
+        )

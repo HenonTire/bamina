@@ -100,18 +100,28 @@ class FeedbackListView(ListAPIView):
 class AddToWishlistView(CreateAPIView):
     serializer_class = WhishlistSerializer
     permission_classes = [IsAuthenticated]
-
     def perform_create(self, serializer):
         product_id = self.request.data.get('product_id')
         product = get_object_or_404(Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
-        wishlist = serializer.save(user=self.request.user)
+
+        # Check if wishlist for user exists or create
+        wishlist, created = WhishList.objects.get_or_create(user=self.request.user)
+
+        # Check if product already in wishlist
+        if wishlist.products.filter(id=product.id).exists():
+            raise ValidationError("Product already in wishlist")
+
         wishlist.products.add(product)
+        wishlist.save()
+        serializer.instance = wishlist  # To set the instance for response
+
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-    
+   
+
 class WhishlistListView(ListAPIView):
     serializer_class = WhishlistSerializer
     permission_classes = [IsAuthenticated]
@@ -146,17 +156,19 @@ class AddToCartView(CreateAPIView):
     def perform_create(self, serializer):
         product_id = self.request.data.get('product_id')
         product = get_object_or_404(Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
+
+        # Check if item already in cart for this user and product
         cart_item, created = CartItem.objects.get_or_create(user=self.request.user, product=product)
-       
+        if not created:
+            raise ValidationError("Product already in cart")
+
         cart_item.save()
+        serializer.instance = cart_item
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-# import the helper if it's external
- # assuming you have this function
-
 
 class PlaceOrderView(CreateAPIView):
     serializer_class = OrderSerializer
@@ -167,26 +179,43 @@ class PlaceOrderView(CreateAPIView):
         request = self.request
         shop_id = self.kwargs.get('shop_id')
 
-        # ✅ Validate shop
+        # Validate shop
         shop = get_object_or_404(Shop, shope_id=shop_id)
 
+        # Get cart items for user and shop
         cart_items = CartItem.objects.filter(user=request.user, product__shop=shop)
         if not cart_items.exists():
             raise ValidationError("Your cart is empty")
 
+        # Prepare current cart products + quantities dict
+        cart_products = {}
+        for item in cart_items:
+            cart_products[item.product.id] = item.quantity
+
+        # Check if active order with same products and quantities exists
+        active_orders = Order.objects.filter(user=request.user, shop=shop, status=Order.OrderStatus.IN_PROCESS)
+        for order in active_orders:
+            order_items = order.items.all()  # assuming related_name='items' for OrderItem FK
+            order_products = {oi.product.id: oi.quantity for oi in order_items}
+
+            if order_products == cart_products:
+                raise ValidationError("An active order with these products already exists")
+
         total_price = sum(item.get_total_price() for item in cart_items)
-        order = serializer.save(user=request.user, total=total_price, shop=shop)
+        order = serializer.save(user=request.user, total=total_price, shop=shop, status=Order.OrderStatus.IN_PROCESS)
 
         for item in cart_items:
             OrderItem.objects.create(
                 order=order,
                 product=item.product,
                 quantity=item.quantity,
-                price=item.product.price
+                price=item.product.price,
             )
 
+        # Clear the cart after order placed
         cart_items.delete()
 
+        # Send notification if token provided
         shop_fcm_token = request.data.get('shop_fcm_token')
         if shop_fcm_token:
             try:
@@ -233,15 +262,16 @@ class OrderSingleProductView(APIView):
         product = get_object_or_404(Products, id=product_id, shop=shop)
 
         shipping_address = request.data.get('shipping_address')
-        payment_method = request.data.get('payment_method')
+        # payment_method = request.data.get('payment_method')
         shop_fcm_token = request.data.get('shop_fcm_token')
 
         order = Order.objects.create(
             user=request.user,
             shop=shop,
             shipping_address=shipping_address,
-            payment_method=payment_method,
-            total=product.price
+            # payment_method=payment_method,
+            total=product.price,
+            status = Order.OrderStatus.IN_PROCESS
         )
 
         OrderItem.objects.create(order=order, product=product, quantity=1, price=product.price)

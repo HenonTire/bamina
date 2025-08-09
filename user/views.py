@@ -60,12 +60,19 @@ class RegisterView(CreateAPIView):
 # ------------------------
 class GoogleLoginView(APIView):
     permission_classes = [AllowAny]
-    def post(self, request):
+
+    def post(self, request, *args, **kwargs):
         token = request.data.get('token')
         access_token_google = request.data.get('access_token')
+        shope_id = kwargs.get('shope_id')
 
         if not token:
             return Response({'error': 'Google ID token is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            shop = Shop.objects.get(shope_id=shope_id)
+        except Shop.DoesNotExist:
+            return Response({'error': 'Invalid shop ID'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             # Verify Google token
@@ -78,7 +85,6 @@ class GoogleLoginView(APIView):
             email = idinfo.get('email')
             name = idinfo.get('name')
 
-            # Get or create user
             try:
                 user = User.objects.get(email=email)
                 created = False
@@ -89,7 +95,7 @@ class GoogleLoginView(APIView):
                 }
                 serializer = UserSerializer(data=user_data)
                 serializer.is_valid(raise_exception=True)
-                user = serializer.save()
+                user = serializer.save(shop=shop)
                 created = True
 
             refresh = RefreshToken.for_user(user)
@@ -116,7 +122,7 @@ class UpdateUserView(RetrieveUpdateDestroyAPIView):
     def get_object(self):
         shope_id = self.kwargs.get('shope_id')
         user = self.request.user
-        if user.shop.shope_id != shope_id:
+        if not user.shop or str(user.shop.shope_id) != str(shope_id):
             raise ValidationError("You do not have permission to update this user.")
         return user
     def patch(self, request, *args, **kwargs):
