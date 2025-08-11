@@ -10,11 +10,20 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+from datetime import timedelta
+from firebase_admin import credentials
+import firebase_admin
+import os
 from pathlib import Path
+from environ import Env
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables
+env = Env()
+env.read_env(BASE_DIR / ".env")
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
@@ -44,11 +53,12 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',  # Token authentication
     'manager',
 
-    'corsheaders', # Ensure this is added if you have a payment app
+    'corsheaders',  # Ensure this is added if you have a payment app
 ]
 
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",  # Ensure this is added for CORS support
+    # Ensure this is added for CORS support
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -63,7 +73,7 @@ ROOT_URLCONF = "bamina.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -151,11 +161,9 @@ REST_FRAMEWORK = {
     ],
 }
 
-import os
-import firebase_admin
-from firebase_admin import credentials
 
-FIREBASE_CRED_PATH = os.path.join(BASE_DIR, 'api', 'credentials', 'laba-5ac38-firebase-adminsdk-fbsvc-ac9af5a24f.json')
+FIREBASE_CRED_PATH = os.path.join(
+    BASE_DIR, 'api', 'credentials', 'laba-5ac38-firebase-adminsdk-fbsvc-ac9af5a24f.json')
 
 if not firebase_admin._apps:
     cred = credentials.Certificate(FIREBASE_CRED_PATH)
@@ -163,11 +171,11 @@ if not firebase_admin._apps:
 
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",     # React/Vite dev server
-    "http://127.0.0.1:5500", 
+    "http://127.0.0.1:5500",
     "http://127.0.0.1:5501",
     "http://localhost:5501",    # plain HTML/JS dev
     "https://your-frontend-site.com",
-      # production
+    # production
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -176,11 +184,22 @@ CORS_ALLOW_HEADERS = [
     'content-type',
 ]
 
-from datetime import timedelta
 
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=72),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=60),    
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=60),
     'AUTH_HEADER_TYPES': ('Bearer',),
     'BLACKLIST_AFTER_ROTATION': True,
 }
+
+# Email settings
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = env('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = 'Bamina Team <baminateam@gmail.com>'
+
+# oAuth settings
+GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
