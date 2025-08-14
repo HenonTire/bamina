@@ -19,11 +19,9 @@ from .permission import IsOwnerOfShop
 from user.helper import set_refresh_cookie
 from django.contrib.auth import get_user_model
 
-<<<<<<< HEAD
-
-=======
 User = get_user_model()
->>>>>>> origin/HEAD
+
+
 class RegisterShopeView(CreateAPIView):
     permission_classes = []
     queryset = Shop.objects.all()
@@ -56,15 +54,11 @@ class TotalRevenueView(APIView):
     def get(self, request, shop_id):
         try:
             shop = Shop.objects.get(shope_id=shop_id)
-<<<<<<< HEAD
             total_revenue = shop.products_set.aggregate(
-                total=models.Sum('price'))['total']
-=======
-            total_revenue = shop.products_set.aggregate(total=models.Sum('price'))['total'] or 0
+                total=models.Sum('price'))['total'] or 0
 
             if total_revenue is None:
                 total_revenue = 0
->>>>>>> origin/HEAD
             return Response({'total_revenue': total_revenue})
         except Shop.DoesNotExist:
             raise ValidationError("Shop does not exist.")
@@ -84,11 +78,7 @@ class TotalOrderView(APIView):
 
 class ListShopProducts(ListAPIView):
     serializer_class = ProductSerializer
-<<<<<<< HEAD
-    # permission_classes = [IsAdminUser, IsOwnerOfShop]
-=======
     permission_classes = [IsOwnerOfShop]
->>>>>>> origin/HEAD
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
@@ -180,6 +170,7 @@ class ShopProductNumByCategory(APIView):
 
 class AdminLoginView(APIView):
     permission_classes = [AllowAny]
+
     def post(self, request):
         email = request.data.get('email')
         password = request.data.get('password')
