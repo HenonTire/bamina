@@ -5,7 +5,7 @@ User = get_user_model()
 class Size(models.TextChoices):
     SMALL = 'small', 'Small'
     MEDIUM = 'medium', 'Medium'
-    LAGRE = 'large', 'Large'
+    LARGE  = 'large', 'Large'
     XL = 'xl', 'Xl'
 
 

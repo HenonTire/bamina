@@ -4,7 +4,7 @@ from rest_framework import status
 from django.shortcuts import get_object_or_404
 from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
 from .helper import get_tokens_for_user
-from .models import Shop, User  # make sure your User model is imported
+from .models import Shop, User 
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):

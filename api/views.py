@@ -193,7 +193,7 @@ class PlaceOrderView(CreateAPIView):
             cart_products[item.product.id] = item.quantity
 
         # Check if active order with same products and quantities exists
-        active_orders = Order.objects.filter(user=request.user, shop=shop, status=Order.OrderStatus.IN_PROCESS)
+        active_orders = Order.objects.filter(user=request.user, shop=shop, status=OrderStatus.IN_PROCESS)
         for order in active_orders:
             order_items = order.items.all()  # assuming related_name='items' for OrderItem FK
             order_products = {oi.product.id: oi.quantity for oi in order_items}
@@ -202,7 +202,7 @@ class PlaceOrderView(CreateAPIView):
                 raise ValidationError("An active order with these products already exists")
 
         total_price = sum(item.get_total_price() for item in cart_items)
-        order = serializer.save(user=request.user, total=total_price, shop=shop, status=Order.OrderStatus.IN_PROCESS)
+        order = serializer.save(user=request.user, total=total_price, shop=shop, status=OrderStatus.IN_PROCESS)
 
         for item in cart_items:
             OrderItem.objects.create(
@@ -271,7 +271,7 @@ class OrderSingleProductView(APIView):
             shipping_address=shipping_address,
             # payment_method=payment_method,
             total=product.price,
-            status = Order.OrderStatus.IN_PROCESS
+            status = OrderStatus.IN_PROCESS
         )
 
         OrderItem.objects.create(order=order, product=product, quantity=1, price=product.price)
