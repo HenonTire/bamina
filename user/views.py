@@ -222,3 +222,11 @@ class PasswordResetConfirmView(APIView):
             )
         serializer.save()
         return Response({"message": "Password has been reset successfully."}, status=status.HTTP_200_OK)
+
+
+class UserDetailView(APIView):
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        serializer = UserSerializer(user)
+        return Response(serializer.data)
