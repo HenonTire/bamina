@@ -98,6 +98,8 @@ class OrderItem(models.Model):
 class Adress(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     address = models.TextField(max_length=500)
+    phone_num = models.CharField(max_length=10)
+    is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

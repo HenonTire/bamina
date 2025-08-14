@@ -22,4 +22,5 @@ urlpatterns = [
     path('<str:shop_id>/adress-detail/<int:pk>/', AdressDetailView.as_view(), name='addressdetail'),
     path('<str:shop_id>/adress-list/', AdreessListView.as_view(), name='addresslist'),
     path('<str:shop_id>/create-adress/', AdressCreateView.as_view(), name='create_address'),
+    path('<str:shop_id>/set-default-adress/', AdressSetDefaultView.as_view(), name='set_default_address'),
 ]

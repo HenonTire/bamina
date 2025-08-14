@@ -18,18 +18,12 @@ from pathlib import Path
 from environ import Env
 
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Load environment variables
+BASE_DIR = Path(__file__).resolve().parent.parent  # keep for general use
 env = Env()
-env.read_env(BASE_DIR / ".env")
+env.read_env(Path(__file__).resolve().parent / ".env")  # <- same folder as settings.py
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-)ky7xgrh_ts*n%s9%o(2nw-7r608=zl^*1wg8f^l^bf574=g0b"
+SECRET_KEY = env("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -54,7 +48,7 @@ INSTALLED_APPS = [
     'manager',
     'corsheaders', 
     'debug_toolbar',# Ensure this is added if you have a payment app
- 
+ # Ensure this is added if you have a payment app
 ]
 
 INTERNAL_IPS = [

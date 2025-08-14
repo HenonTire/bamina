@@ -70,8 +70,8 @@ class OrderSerializer(ModelSerializer):
 class AdressSerializer(ModelSerializer):
     class Meta:
         model = Adress
-        fields = ['id', 'user', 'address', 'created_at']
-        read_only_fields = ['id', 'user', 'created_at']
+        fields = ['id', 'user', 'address', 'created_at', 'phone_num', 'is_default']
+        read_only_fields = ['id', 'user', 'created_at', 'is_default']
     
     def create(self, validated_data):
         user = self.context['request'].user
