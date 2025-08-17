@@ -1,3 +1,4 @@
+from rest_framework.parsers import MultiPartParser, FormParser
 from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
@@ -119,9 +120,11 @@ class GoogleLoginView(APIView):
 
 class UpdateUserView(RetrieveUpdateDestroyAPIView):
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
     serializer_class = UserSerializer
     queryset = User.objects.all()
     lookup_field = 'pk'
+
     # def get_object(self):
     #     return self.request.user  # Only allow update of the current user
 
@@ -134,8 +137,12 @@ class UpdateUserView(RetrieveUpdateDestroyAPIView):
         return user
 
     def patch(self, request, *args, **kwargs):
-        # For partial update, call update with partial=True
-        return self.partial_update(request, *args, **kwargs)
+        serializer = self.get_serializer(
+            self.get_object(), data=request.data, partial=True, context={'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 class LogoutView(APIView):
@@ -143,7 +150,7 @@ class LogoutView(APIView):
 
     def post(self, request, *args, **kwargs):
         shope_id = kwargs.get('shope_id')
-        refresh_token = request.COOKIES.get('refresh')
+        refresh_token = request.COOKIES.get('refresh_token')
 
         if not refresh_token:
             return Response({'detail': 'No refresh token in cookie'}, status=status.HTTP_400_BAD_REQUEST)
@@ -228,5 +235,5 @@ class UserDetailView(APIView):
 
     def get(self, request, *args, **kwargs):
         user = request.user
-        serializer = UserSerializer(user)
+        serializer = UserSerializer(user, context={'request': request})
         return Response(serializer.data)

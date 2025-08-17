@@ -10,14 +10,25 @@ User = get_user_model()
 
 
 class UserSerializer(serializers.ModelSerializer):
+    profile_photo = serializers.ImageField(required=False, allow_null=True)
+    profile_photo_url = serializers.SerializerMethodField()
+
     class Meta:
         model = User
         fields = ['id', 'username', 'email',
-                  'password', 'shop', 'profile_photo']
+                  'password', 'shop', 'profile_photo', 'profile_photo_url']
         read_only_fields = ['id']
         extra_kwargs = {
             'password': {'write_only': True, 'required': False, 'allow_blank': True}
         }
+
+    def get_profile_photo_url(self, obj):
+        request = self.context.get('request')
+        if obj.profile_photo and request:
+            return request.build_absolute_uri(obj.profile_photo.url)
+        elif obj.profile_photo:
+            return f"{self.context.get('BASE_URL', '')}{obj.profile_photo.url}"
+        return None
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
@@ -33,6 +44,10 @@ class UserSerializer(serializers.ModelSerializer):
         instance.username = validated_data.get('username', instance.username)
         instance.email = validated_data.get('email', instance.email)
         instance.shop = validated_data.get('shop', instance.shop)
+        profile_photo = validated_data.get('profile_photo')
+        print(profile_photo)
+        if profile_photo:
+            instance.profile_photo = profile_photo
 
         password = validated_data.get('password')
         if password:

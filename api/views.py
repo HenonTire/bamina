@@ -4,18 +4,24 @@ from .serializer import *
 from rest_framework.generics import *
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
-from .utils import send_fcm_notification  
+from .utils import send_fcm_notification
+from rest_framework.exceptions import NotFound
+from django.shortcuts import get_object_or_404
+from rest_framework import status
+
 
 class ListProducts(ListAPIView):
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticated]
+    # we don't need users to be authenticated cause we want non-logged in users to access shop products
+    permission_classes = [AllowAny]
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
         return Products.objects.filter(shop__shope_id=shop_id)
+
 
 class DetailProduct(RetrieveUpdateDestroyAPIView):
     serializer_class = ProductSerializer
@@ -29,20 +35,22 @@ class DetailProduct(RetrieveUpdateDestroyAPIView):
         return get_object_or_404(Products, pk=pk, shop__shope_id=shope_id)
 
 
-
 class SearchProduct(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, q, *args, **kwargs):
         # Case-insensitive partial match on name
         shop_id = self.kwargs.get('shop_id')
-        result = Products.objects.filter(name__icontains=q ,shop__shope_id=shop_id)
+        result = Products.objects.filter(
+            name__icontains=q, shop__shope_id=shop_id)
         serializer = ProductSerializer(result, many=True)
         return Response(serializer.data)
+
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
         return Products.objects.filter(shop__shope_id=shop_id)
-    
+
+
 class ListProductsByCategory(ListAPIView):
     serializer_class = ProductSerializer
     permission_classes = [IsAuthenticated]
@@ -51,21 +59,23 @@ class ListProductsByCategory(ListAPIView):
         shop_id = self.kwargs.get('shop_id')
         category = self.kwargs.get('category')
         return Products.objects.filter(shop__shope_id=shop_id, category=category)
-    
+
+
 class ProductFeedbackView(CreateAPIView):
     serializer_class = ProductFeedbackSerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
         product_id = self.kwargs.get('product_id')
-        product = get_object_or_404(Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
+        product = get_object_or_404(
+            Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
         serializer.save(product=product, user=self.request.user)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-    
+
 
 class ShopFeedbackView(CreateAPIView):
     serializer_class = ShopFeedBackSerializer
@@ -80,6 +90,8 @@ class ShopFeedbackView(CreateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+
+
 class FeedbackDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = ShopFeedBackSerializer
     permission_classes = [IsAuthenticated]
@@ -90,22 +102,29 @@ class FeedbackDetailView(RetrieveUpdateDestroyAPIView):
         shop_id = self.kwargs.get('shop_id')
         pk = self.kwargs.get('pk')
         return get_object_or_404(ShopFeedBack, pk=pk, shop__shope_id=shop_id)
+
+
 class FeedbackListView(ListAPIView):
     serializer_class = ShopFeedBackSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
-        return ShopFeedBack.objects.filter(shop__shope_id=shop_id)  
+        return ShopFeedBack.objects.filter(shop__shope_id=shop_id)
+
+
 class AddToWishlistView(CreateAPIView):
     serializer_class = WhishlistSerializer
     permission_classes = [IsAuthenticated]
+
     def perform_create(self, serializer):
         product_id = self.request.data.get('product_id')
-        product = get_object_or_404(Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
+        product = get_object_or_404(
+            Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
 
         # Check if wishlist for user exists or create
-        wishlist, created = WhishList.objects.get_or_create(user=self.request.user)
+        wishlist, created = WhishList.objects.get_or_create(
+            user=self.request.user)
 
         # Check if product already in wishlist
         if wishlist.products.filter(id=product.id).exists():
@@ -115,12 +134,36 @@ class AddToWishlistView(CreateAPIView):
         wishlist.save()
         serializer.instance = wishlist  # To set the instance for response
 
-
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-   
+
+
+class RemoveFromWishlistView(DestroyAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, *args, **kwargs):
+        product_id = self.request.data.get('product_id')
+        if not product_id:
+            return Response({"error": "Product ID is required"}, status=400)
+
+        product = get_object_or_404(
+            Products,
+            id=product_id,
+            shop__shope_id=self.kwargs.get('shop_id')
+        )
+
+        wishlist = get_object_or_404(WhishList, user=self.request.user)
+
+        if not wishlist.products.filter(id=product.id).exists():
+            raise NotFound("Product not found in wishlist")
+
+        wishlist.products.remove(product)
+        wishlist.save()
+
+        return Response({"message": "Product removed from wishlist"}, status=200)
+
 
 class WhishlistListView(ListAPIView):
     serializer_class = WhishlistSerializer
@@ -155,10 +198,12 @@ class AddToCartView(CreateAPIView):
 
     def perform_create(self, serializer):
         product_id = self.request.data.get('product_id')
-        product = get_object_or_404(Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
+        product = get_object_or_404(
+            Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
 
         # Check if item already in cart for this user and product
-        cart_item, created = CartItem.objects.get_or_create(user=self.request.user, product=product)
+        cart_item, created = CartItem.objects.get_or_create(
+            user=self.request.user, product=product)
         if not created:
             raise ValidationError("Product already in cart")
 
@@ -169,6 +214,26 @@ class AddToCartView(CreateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+
+
+class RemoveFromCartView(DestroyAPIView):
+    serializer_class = CartItemSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_object(self):
+        product_id = self.request.data.get('product_id')
+        product = get_object_or_404(
+            Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id')
+        )
+        cart_item = get_object_or_404(
+            CartItem, user=self.request.user, product=product)
+        return cart_item
+
+    def destroy(self, request, *args, **kwargs):
+        cart_item = self.get_object()
+        cart_item.delete()
+        return Response({"detail": "Product removed from cart"}, status=status.HTTP_204_NO_CONTENT)
+
 
 class PlaceOrderView(CreateAPIView):
     serializer_class = OrderSerializer
@@ -183,7 +248,8 @@ class PlaceOrderView(CreateAPIView):
         shop = get_object_or_404(Shop, shope_id=shop_id)
 
         # Get cart items for user and shop
-        cart_items = CartItem.objects.filter(user=request.user, product__shop=shop)
+        cart_items = CartItem.objects.filter(
+            user=request.user, product__shop=shop)
         if not cart_items.exists():
             raise ValidationError("Your cart is empty")
 
@@ -193,16 +259,19 @@ class PlaceOrderView(CreateAPIView):
             cart_products[item.product.id] = item.quantity
 
         # Check if active order with same products and quantities exists
-        active_orders = Order.objects.filter(user=request.user, shop=shop, status=OrderStatus.IN_PROCESS)
+        active_orders = Order.objects.filter(
+            user=request.user, shop=shop, status=OrderStatus.IN_PROCESS)
         for order in active_orders:
             order_items = order.items.all()  # assuming related_name='items' for OrderItem FK
             order_products = {oi.product.id: oi.quantity for oi in order_items}
 
             if order_products == cart_products:
-                raise ValidationError("An active order with these products already exists")
+                raise ValidationError(
+                    "An active order with these products already exists")
 
         total_price = sum(item.get_total_price() for item in cart_items)
-        order = serializer.save(user=request.user, total=total_price, shop=shop, status=OrderStatus.IN_PROCESS)
+        order = serializer.save(
+            user=request.user, total=total_price, shop=shop, status=OrderStatus.IN_PROCESS)
 
         for item in cart_items:
             OrderItem.objects.create(
@@ -271,10 +340,11 @@ class OrderSingleProductView(APIView):
             shipping_address=shipping_address,
             # payment_method=payment_method,
             total=product.price,
-            status = OrderStatus.IN_PROCESS
+            status=OrderStatus.IN_PROCESS
         )
 
-        OrderItem.objects.create(order=order, product=product, quantity=1, price=product.price)
+        OrderItem.objects.create(
+            order=order, product=product, quantity=1, price=product.price)
 
         if shop_fcm_token:
             try:
@@ -298,7 +368,8 @@ class OrderList(ListAPIView):
         shop_id = self.kwargs.get('shop_id')
         shop = get_object_or_404(Shop, shope_id=shop_id)
         return Order.objects.filter(user=self.request.user, shop=shop)
-    
+
+
 class AdressCreateView(CreateAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
@@ -310,13 +381,16 @@ class AdressCreateView(CreateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
+
+
 class AdreessListView(ListAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return Adress.objects.filter(user=self.request.user)
-    
+
+
 class AdressDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
@@ -324,3 +398,17 @@ class AdressDetailView(RetrieveUpdateDestroyAPIView):
 
     def get_object(self):
         return get_object_or_404(Adress, pk=self.kwargs.get('pk'), user=self.request.user)
+
+
+class AddressRemoveView(DestroyAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, *args, **kwargs):
+        address_id = request.data.get("address_id")
+        if not address_id:
+            return Response({"error": "Address ID is required"}, status=400)
+
+        address = get_object_or_404(Adress, id=address_id, user=request.user)
+        address.delete()
+
+        return Response({"message": "Address removed successfully"}, status=status.HTTP_200_OK)
