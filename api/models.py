@@ -1,6 +1,8 @@
 from django.db import models
 from manager.models import Shop
 from django.contrib.auth import get_user_model
+from . import validators
+
 User = get_user_model()
 
 
@@ -115,6 +117,9 @@ class OrderItem(models.Model):
 class Adress(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     address = models.TextField(max_length=500)
+    phone_num = models.CharField(max_length=13,  validators=[
+                                 validators.ethiopian_phone_validator])
+    is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -85,7 +85,7 @@ class OrderSerializer(ModelSerializer):
 class AdressSerializer(ModelSerializer):
     class Meta:
         model = Adress
-        fields = ['id', 'user', 'address', 'created_at']
+        fields = ['id', 'user', 'address', 'created_at', 'phone_num']
         read_only_fields = ['id', 'user', 'created_at']
 
     def create(self, validated_data):
