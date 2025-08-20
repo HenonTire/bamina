@@ -299,7 +299,7 @@ class OrderList(ListAPIView):
         shop = get_object_or_404(Shop, shope_id=shop_id)
         return Order.objects.filter(user=self.request.user, shop=shop)
     
-class AdressCreateView(CreateAPIView):
+class AddressCreateView(CreateAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
 
@@ -310,14 +310,14 @@ class AdressCreateView(CreateAPIView):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-class AdreessListView(ListAPIView):
+class AddreessListView(ListAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         return Adress.objects.filter(user=self.request.user)
     
-class AdressDetailView(RetrieveUpdateDestroyAPIView):
+class AddressDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'pk'
@@ -325,7 +325,7 @@ class AdressDetailView(RetrieveUpdateDestroyAPIView):
     def get_object(self):
         return get_object_or_404(Adress, pk=self.kwargs.get('pk'), user=self.request.user)
     
-class AdressSetDefaultView(APIView):
+class AddressSetDefaultView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):

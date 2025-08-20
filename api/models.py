@@ -77,12 +77,22 @@ class OrderStatus(models.TextChoices):
 # class PaymentMethod(models.TextChoices):
 #     CASH = 'cash', 'Cash on Delivery'
 #     PAY_HERE = 'pay_here', 'Card Payment'
+
+class Adress(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    address = models.TextField(max_length=500)
+    phone_num = models.CharField(max_length=10)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.address}"
 class Order(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='shop', blank=True, null=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     total = models.DecimalField(decimal_places=2, max_digits=10)
     status = models.CharField(max_length=100, choices=OrderStatus.choices, default=OrderStatus.PENDING)
-    shipping_address = models.TextField(max_length=500)
+    shipping_address = models.OneToOneField(Adress, on_delete=models.CASCADE, blank=True)
     # payment_method = models.CharField(max_length=50, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
 
 
@@ -94,13 +104,3 @@ class OrderItem(models.Model):
 
     def get_total_price(self):
         return self.price * self.quantity
-
-class Adress(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
-    address = models.TextField(max_length=500)
-    phone_num = models.CharField(max_length=10)
-    is_default = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.user.username} - {self.address}"
