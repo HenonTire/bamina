@@ -412,3 +412,22 @@ class AddressRemoveView(DestroyAPIView):
         address.delete()
 
         return Response({"message": "Address removed successfully"}, status=status.HTTP_200_OK)
+
+
+class AdressSetDefaultView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        address_id = request.data.get('address_id')
+        if not address_id:
+            return Response({"error": "Address ID is required"}, status=400)
+        address = get_object_or_404(Adress, pk=address_id, user=request.user)
+
+        # Set all other addresses to not default
+        Adress.objects.filter(user=request.user).update(is_default=False)
+
+        # Set this address as default
+        address.is_default = True
+        address.save()
+
+        return Response({"message": "Address set as default successfully"})

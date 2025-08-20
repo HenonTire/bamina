@@ -1,5 +1,8 @@
 # Created by https://www.gitignore.io
 
+db.sqlite3
+*.pyc
+__pycache__/
 
 /api/credentials/*.json
 ### OSX ###
@@ -89,3 +92,7 @@ __pycache__/
 local_settings.py
 
 db.sqlite3
+
+db.sqlite3
+*.pyc
+__pycache__/
