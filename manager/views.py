@@ -1,5 +1,10 @@
+from django.shortcuts import get_object_or_404
+from api.models import Products, Order
+from manager.models import Shop, ShopOwner
+from datetime import timedelta, datetime
+from django.db.models import Sum, Count
+from django.utils import timezone
 from django.shortcuts import render
-from .models import Shop, ShopOwner
 from .serializer import ShopeSerializer
 from rest_framework.generics import ListCreateAPIView, RetrieveUpdateDestroyAPIView, CreateAPIView, ListAPIView
 from rest_framework.response import Response
@@ -10,7 +15,6 @@ from rest_framework.views import APIView
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 from django.db import models
-from api.models import Order
 from api.serializer import OrderSerializer
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -18,6 +22,8 @@ from django.contrib.auth import authenticate
 from .permission import IsOwnerOfShop
 from user.helper import set_refresh_cookie
 from django.contrib.auth import get_user_model
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.generics import UpdateAPIView, DestroyAPIView
 
 User = get_user_model()
 
@@ -134,21 +140,27 @@ class ListShopUsers(APIView):
     def get(self, request, shop_id):
         try:
             shop = Shop.objects.get(shope_id=shop_id)
-            users = User.objects.filter(shopowner__shop=shop)
+            # users = User.objects.filter(shopowner__shop=shop)
+            all_users = User.objects.filter(shop=shop)
+
+            owners = User.objects.filter(shopowner__shop=shop)
+            users = all_users.exclude(
+                id__in=owners.values_list('id', flat=True))
 
             user_data = []
             for user in users:
                 profile_value = None
-                if hasattr(user, 'profile') and user.profile:
+                if hasattr(user, 'profile_photo') and user.profile_photo:
                     try:
-                        profile_value = user.profile.url
+                        profile_value = request.build_absolute_uri(
+                            user.profile_photo.url)
                     except ValueError:
                         profile_value = None
                 user_data.append({
                     'id': user.id,
                     'username': user.username,
                     'email': user.email,
-                    'profile': profile_value
+                    'profile_photo': profile_value
                 })
             return Response({'users': user_data})
         except Shop.DoesNotExist:
@@ -199,3 +211,134 @@ class AdminLoginView(APIView):
             {'error': 'Invalid credentials or not admin'},
             status=status.HTTP_401_UNAUTHORIZED
         )
+
+
+class CheckAdminView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        user = request.user
+        return Response({"isAdmin": user.is_staff})
+
+
+class ShopMetricsView(APIView):
+    def get(self, request, shop_id):
+        shop = get_object_or_404(Shop, shope_id=shop_id)
+        today = timezone.now().date()
+        first_day_this_month = today.replace(day=1)
+        first_day_last_month = (first_day_this_month -
+                                timedelta(days=1)).replace(day=1)
+        last_day_last_month = first_day_this_month - timedelta(days=1)
+
+        revenue_this_month = Order.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_this_month
+        ).aggregate(total=Sum('total'))['total'] or 0
+
+        revenue_last_month = Order.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_last_month,
+            created_at__lte=last_day_last_month
+        ).aggregate(total=Sum('total'))['total'] or 0
+
+        orders_this_month = Order.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_this_month
+        ).count()
+
+        orders_last_month = Order.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_last_month,
+            created_at__lte=last_day_last_month
+        ).count()
+
+        customers_this_month = User.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_this_month
+        ).count()
+
+        customers_last_month = User.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_last_month,
+            created_at__lte=last_day_last_month
+        ).count()
+
+        products_this_month = Products.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_this_month
+        ).count()
+
+        products_last_month = Products.objects.filter(
+            shop=shop,
+            created_at__gte=first_day_last_month,
+            created_at__lte=last_day_last_month
+        ).count()
+
+        return Response({
+            "revenue": {"current": revenue_this_month, "previous": revenue_last_month},
+            "orders": {"current": orders_this_month, "previous": orders_last_month},
+            "customers": {"current": customers_this_month, "previous": customers_last_month},
+            "products": {"current": products_this_month, "previous": products_last_month},
+        })
+
+
+class RevenueHistoryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, shop_id):
+        shop = Shop.objects.get(shope_id=shop_id)
+        today = timezone.now().date()
+        chart_data = []
+
+        for i in range(6, 0, -1):
+            month_start = (today.replace(day=1) -
+                           timedelta(days=30 * i)).replace(day=1)
+            month_end = (month_start + timedelta(days=31)).replace(day=1)
+
+            month_start = timezone.make_aware(
+                datetime.combine(month_start, datetime.min.time()))
+            month_end = timezone.make_aware(
+                datetime.combine(month_end, datetime.min.time()))
+            revenue = (
+                Order.objects.filter(
+                    shop=shop,
+                    status="paid",
+                    created_at__gte=month_start,
+                    created_at__lt=month_end,
+                ).aggregate(total=Sum("total"))["total"]
+                or 0
+            )
+            chart_data.append(
+                {
+                    "month": month_start.strftime("%B"),
+                    "amount": float(revenue),
+                }
+            )
+
+        return Response({"revenueHistory": chart_data})
+
+
+class EditProductView(UpdateAPIView):
+    serializer_class = ProductSerializer
+    permission_classes = [IsOwnerOfShop]
+    lookup_field = 'pk'
+
+    def get_object(self):
+        shop_id = self.kwargs.get('shop_id')
+        pk = self.kwargs.get('pk')
+        return get_object_or_404(Products, pk=pk, shop__shope_id=shop_id)
+
+
+class RemoveProductView(DestroyAPIView):
+    permission_classes = [IsOwnerOfShop]
+    lookup_field = 'pk'
+
+    def get_object(self):
+        shop_id = self.kwargs.get('shop_id')
+        pk = self.kwargs.get('pk')
+        return get_object_or_404(Products, pk=pk, shop__shope_id=shop_id)
+
+    def destroy(self, request, *args, **kwargs):
+        product = self.get_object()
+        product.delete()
+        return Response({"message": "Product removed successfully"}, status=status.HTTP_204_NO_CONTENT)

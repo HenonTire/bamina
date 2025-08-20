@@ -99,6 +99,7 @@ class Order(models.Model):
     status = models.CharField(
         max_length=100, choices=OrderStatus.choices, default=OrderStatus.PENDING)
     shipping_address = models.TextField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
     # payment_method = models.CharField(max_length=50, choices=PaymentMethod.choices, default=PaymentMethod.CASH)
 
 
@@ -109,6 +110,7 @@ class OrderItem(models.Model):
     quantity = models.PositiveIntegerField()
     price = models.DecimalField(
         decimal_places=2, max_digits=10)  # Price at time of order
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def get_total_price(self):
         return self.price * self.quantity
@@ -124,3 +126,13 @@ class Adress(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.address}"
+
+
+class FCMToken(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="fcm_tokens")
+    token = models.CharField(max_length=255, unique=True)
+    shop = models.ForeignKey(
+        Shop, on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)

@@ -11,6 +11,7 @@ from .utils import send_fcm_notification
 from rest_framework.exceptions import NotFound
 from django.shortcuts import get_object_or_404
 from rest_framework import status
+from manager.models import ShopOwner
 
 
 class ListProducts(ListAPIView):
@@ -20,7 +21,7 @@ class ListProducts(ListAPIView):
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
-        return Products.objects.filter(shop__shope_id=shop_id)
+        return Products.objects.filter(shop__shope_id=shop_id).order_by('-created_at')
 
 
 class DetailProduct(RetrieveUpdateDestroyAPIView):
@@ -285,16 +286,30 @@ class PlaceOrderView(CreateAPIView):
         cart_items.delete()
 
         # Send notification if token provided
-        shop_fcm_token = request.data.get('shop_fcm_token')
-        if shop_fcm_token:
-            try:
+        try:
+            shop_fcm_token = request.data.get('shop_fcm_token')
+            if shop_fcm_token:
                 send_fcm_notification(
                     shop_fcm_token,
                     "🛒 New Order Placed",
                     f"{request.user.username} just placed an order with total ${total_price}"
                 )
-            except Exception as e:
-                print("Failed to send FCM:", str(e))
+            else:
+                shop_owner = ShopOwner.objects.filter(shop=shop).first()
+                if shop_owner:
+                    tokens = FCMToken.objects.filter(
+                        user=shop_owner.user, shop=shop).values_list('token', flat=True)
+                    for token in tokens:
+                        try:
+                            send_fcm_notification(
+                                token,
+                                "🛒 New Order Placed",
+                                f"{request.user.username} just placed an order in your shop."
+                            )
+                        except Exception as e:
+                            print(f"Failed to send FCM to {token}: {e}")
+        except Exception as e:
+            print("Failed to send FCM:", str(e))
 
         return order
 
@@ -412,3 +427,15 @@ class AddressRemoveView(DestroyAPIView):
         address.delete()
 
         return Response({"message": "Address removed successfully"}, status=status.HTTP_200_OK)
+
+
+class SaveFCMTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, shop_id):
+        token = request.data.get("token")
+
+        if token:
+            FCMToken.objects.update_or_create(
+                user=request.user, token=token, shop=Shop.objects.get(shope_id=shop_id))
+        return Response({"message": "Token saved"})
