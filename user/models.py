@@ -35,6 +35,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     shop = models.ForeignKey(
         Shop, on_delete=models.CASCADE, blank=True, null=True)
     email = models.EmailField(unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)

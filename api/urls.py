@@ -48,4 +48,6 @@ urlpatterns = [
          AddressRemoveView.as_view(), name='remove_address'),
     path('<str:shop_id>/set-default-adress/',
          AdressSetDefaultView.as_view(), name='set_default_address'),
+    path('<str:shop_id>/save-fcm-token/',
+         SaveFCMTokenView.as_view(), name='save_fcm_token'),
 ]
