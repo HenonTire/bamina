@@ -446,3 +446,15 @@ class AdressSetDefaultView(APIView):
         address.save()
 
         return Response({"message": "Address set as default successfully"})
+
+
+class SaveFCMTokenView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, shop_id):
+        token = request.data.get("token")
+
+        if token:
+            FCMToken.objects.update_or_create(
+                user=request.user, token=token, shop=Shop.objects.get(shope_id=shop_id))
+        return Response({"message": "Token saved"})

@@ -67,9 +67,11 @@ class CartItemSerializer(ModelSerializer):
 
 
 class OrderItemSerializer(ModelSerializer):
+    product = ProductSerializer(read_only=True, many=False)
+
     class Meta:
         model = OrderItem
-        fields = ['product', 'quantity', 'price']
+        fields = ['product']
 
 
 class OrderSerializer(ModelSerializer):
