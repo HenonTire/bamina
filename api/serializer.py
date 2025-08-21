@@ -74,14 +74,7 @@ class OrderItemSerializer(ModelSerializer):
         fields = ['product']
 
 
-class OrderSerializer(ModelSerializer):
-    items = OrderItemSerializer(many=True, read_only=True)
 
-    class Meta:
-        model = Order
-        fields = ['id', 'user', 'total', 'status',
-                  'shipping_address',  'items']
-        read_only_fields = ['id', 'user', 'total', 'status', 'items']
 
 
 class AdressSerializer(ModelSerializer):
@@ -95,3 +88,13 @@ class AdressSerializer(ModelSerializer):
         user = self.context['request'].user
         validated_data['user'] = user
         return super().create(validated_data)
+
+class OrderSerializer(ModelSerializer):
+    items = OrderItemSerializer(many=True, read_only=True)
+    shipping_address = AdressSerializer(many=False, read_only=True)
+
+    class Meta:
+        model = Order
+        fields = ['id', 'user', 'total', 'status',
+                  'shipping_address',  'items']
+        read_only_fields = ['id', 'user', 'total', 'status', 'items']
