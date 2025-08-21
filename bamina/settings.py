@@ -14,7 +14,7 @@ env.read_env(Path(__file__).resolve().parent / ".env")  # <- same folder as sett
 SECRET_KEY = env("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ['bamina.onrender.com']
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
