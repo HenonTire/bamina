@@ -245,6 +245,12 @@ class PlaceOrderView(CreateAPIView):
         request = self.request
         shop_id = self.kwargs.get('shop_id')
 
+        shipping_address_id = request.data.get("shipping_address_id")
+        if not shipping_address_id:
+            raise ValidationError("Shipping address is required")
+        shipping_address = get_object_or_404(
+            Adress, id=shipping_address_id, user=request.user)
+
         # Validate shop
         shop = get_object_or_404(Shop, shope_id=shop_id)
 
@@ -272,7 +278,7 @@ class PlaceOrderView(CreateAPIView):
 
         total_price = sum(item.get_total_price() for item in cart_items)
         order = serializer.save(
-            user=request.user, total=total_price, shop=shop, status=OrderStatus.IN_PROCESS)
+            user=request.user, total=total_price, shop=shop, status=OrderStatus.IN_PROCESS, shipping_address=shipping_address)
 
         for item in cart_items:
             OrderItem.objects.create(
@@ -283,7 +289,8 @@ class PlaceOrderView(CreateAPIView):
             )
 
         # Clear the cart after order placed
-        cart_items.delete()
+        CartItem.objects.filter(
+            user=request.user, product__shop=shop).delete()
 
         # Send notification if token provided
         try:
@@ -345,8 +352,11 @@ class OrderSingleProductView(APIView):
         product_id = request.data.get('product_id')
         product = get_object_or_404(Products, id=product_id, shop=shop)
 
-        shipping_address = request.data.get('shipping_address')
-        # payment_method = request.data.get('payment_method')
+        shipping_address_id = request.data.get("shipping_address_id")
+        if not shipping_address_id:
+            return Response({"error": "Shipping address is required"}, status=400)
+        shipping_address = get_object_or_404(
+            Adress, id=shipping_address_id, user=request.user)
         shop_fcm_token = request.data.get('shop_fcm_token')
 
         order = Order.objects.create(
@@ -371,7 +381,7 @@ class OrderSingleProductView(APIView):
             except Exception as e:
                 print("Failed to send FCM:", str(e))
 
-        serializer = ProductSerializer(product)
+        serializer = ProductSerializer(order)
         return Response(serializer.data)
 
 
@@ -385,7 +395,7 @@ class OrderList(ListAPIView):
         return Order.objects.filter(user=self.request.user, shop=shop)
 
 
-class AdressCreateView(CreateAPIView):
+class AddressCreateView(CreateAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
 
@@ -398,7 +408,7 @@ class AdressCreateView(CreateAPIView):
         return context
 
 
-class AdreessListView(ListAPIView):
+class AddreessListView(ListAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
 
@@ -406,7 +416,7 @@ class AdreessListView(ListAPIView):
         return Adress.objects.filter(user=self.request.user)
 
 
-class AdressDetailView(RetrieveUpdateDestroyAPIView):
+class AddressDetailView(RetrieveUpdateDestroyAPIView):
     serializer_class = AdressSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = 'pk'
@@ -429,7 +439,7 @@ class AddressRemoveView(DestroyAPIView):
         return Response({"message": "Address removed successfully"}, status=status.HTTP_200_OK)
 
 
-class AdressSetDefaultView(APIView):
+class AddressSetDefaultView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, *args, **kwargs):

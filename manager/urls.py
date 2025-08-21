@@ -28,5 +28,6 @@ urlpatterns = [
     path('<str:shop_id>/remove-product/<int:pk>/',
          RemoveProductView.as_view(), name='remove_product'),
     path('admin-login/', AdminLoginView.as_view(), name='admin_login'),
-    path('check-admin/', CheckAdminView.as_view(), name='check_admin'),
+    path('<str:shop_id>/check-admin/',
+         CheckAdminView.as_view(), name='check_admin'),
 ]

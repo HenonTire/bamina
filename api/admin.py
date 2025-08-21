@@ -11,4 +11,5 @@ admin.site.register(CartItem)
 admin.site.register(Order)
 admin.site.register(OrderItem)  # Uncomment if OrderItem model is defined and registered
 from manager.models import Shop
-admin.site.register(Shop)  # Register the Shop model if it's not already registered
+admin.site.register(Shop) 
+admin.site.register(Adress) # Register the Shop model if it's not already registered

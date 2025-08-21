@@ -214,7 +214,7 @@ class AdminLoginView(APIView):
 
 
 class CheckAdminView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOwnerOfShop]
 
     def get(self, request, *args, **kwargs):
         user = request.user
@@ -229,6 +229,11 @@ class ShopMetricsView(APIView):
         first_day_last_month = (first_day_this_month -
                                 timedelta(days=1)).replace(day=1)
         last_day_last_month = first_day_this_month - timedelta(days=1)
+
+        first_day_this_month = timezone.make_aware(
+            datetime.combine(first_day_this_month, datetime.min.time()))
+        last_day_last_month = timezone.make_aware(
+            datetime.combine(last_day_last_month, datetime.min.time()))
 
         revenue_this_month = Order.objects.filter(
             shop=shop,
