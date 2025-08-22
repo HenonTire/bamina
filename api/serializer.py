@@ -7,11 +7,19 @@ from rest_framework import serializers
 
 class ProductSerializer(ModelSerializer):
     shope = ShopeSerializer(read_only=True)
+    image_url = serializers.SerializerMethodField(read_only=True)
+    image = serializers.ImageField(write_only=True, required=False)
 
     class Meta:
         model = Products
         fields = ['id', 'name', 'description', 'price',
-                  'discount_price', 'image', 'category', 'size', 'shope']
+                  'discount_price', 'image', 'image_url', 'category', 'size', 'shope']
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        if obj.image and hasattr(obj.image, 'url'):
+            return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+        return None
 
 
 class ProductFeedbackSerializer(ModelSerializer):

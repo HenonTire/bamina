@@ -1,6 +1,8 @@
 from django.db import models
 from manager.models import Shop
 from django.contrib.auth import get_user_model
+from cloudinary.models import CloudinaryField
+
 from . import validators
 
 User = get_user_model()
@@ -24,7 +26,8 @@ class Products(models.Model):
     shop = models.ForeignKey(Shop, on_delete=models.CASCADE)
     name = models.CharField(max_length=100)
     description = models.TextField(max_length=500)
-    image = models.ImageField(upload_to='product-image/')
+    image = CloudinaryField('product_image', blank=True,
+                            null=True, folder="products/")
     price = models.DecimalField(decimal_places=2, max_digits=10)
     discount_price = models.DecimalField(
         decimal_places=2, max_digits=10, blank=True, null=True)
