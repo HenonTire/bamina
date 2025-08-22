@@ -1,3 +1,4 @@
+from .models import Notification
 from rest_framework.serializers import ModelSerializer
 from .models import *
 from manager.serializer import ShopeSerializer
@@ -74,9 +75,6 @@ class OrderItemSerializer(ModelSerializer):
         fields = ['product']
 
 
-
-
-
 class AdressSerializer(ModelSerializer):
     class Meta:
         model = Adress
@@ -89,6 +87,7 @@ class AdressSerializer(ModelSerializer):
         validated_data['user'] = user
         return super().create(validated_data)
 
+
 class OrderSerializer(ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     shipping_address = AdressSerializer(many=False, read_only=True)
@@ -98,3 +97,9 @@ class OrderSerializer(ModelSerializer):
         fields = ['id', 'user', 'total', 'status',
                   'shipping_address',  'items']
         read_only_fields = ['id', 'user', 'total', 'status', 'items']
+
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = ["id", "title", "body", "created_at"]

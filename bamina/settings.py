@@ -8,7 +8,8 @@ from environ import Env
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # keep for general use
 env = Env()
-env.read_env(Path(__file__).resolve().parent / ".env")  # <- same folder as settings.py
+# <- same folder as settings.py
+env.read_env(Path(__file__).resolve().parent / ".env")
 
 
 SECRET_KEY = env("SECRET_KEY")
@@ -34,9 +35,9 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'rest_framework_simplejwt.token_blacklist',  # Token authentication
     'manager',
-    'corsheaders', 
-    'debug_toolbar',# Ensure this is added if you have a payment app
- # Ensure this is added if you have a payment app
+    'corsheaders',
+    'debug_toolbar',  # Ensure this is added if you have a payment app
+    # Ensure this is added if you have a payment app
 ]
 
 INTERNAL_IPS = [
@@ -45,10 +46,11 @@ INTERNAL_IPS = [
 
 
 MIDDLEWARE = [
-    
+
     "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
-    'debug_toolbar.middleware.DebugToolbarMiddleware',  # Ensure this is added for CORS support
+    # Ensure this is added for CORS support
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -157,7 +159,7 @@ REST_FRAMEWORK = {
 
 
 FIREBASE_CRED_PATH = os.path.join(
-    BASE_DIR, 'api', 'credentials', 'laba-5ac38-firebase-adminsdk-fbsvc-ac9af5a24f.json')
+    BASE_DIR, 'api', 'credentials', 'bamina-store-1879c-firebase-adminsdk-fbsvc-de2f419517.json')
 
 if not firebase_admin._apps:
     cred = credentials.Certificate(FIREBASE_CRED_PATH)

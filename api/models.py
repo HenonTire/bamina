@@ -140,3 +140,18 @@ class FCMToken(models.Model):
         Shop, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class Notification(models.Model):
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="notifications")
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE)
+    title = models.CharField(max_length=255)
+    body = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.title} -> {self.user.username}"
