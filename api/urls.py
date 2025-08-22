@@ -50,4 +50,6 @@ urlpatterns = [
          AddressSetDefaultView.as_view(), name='set_default_address'),
     path('<str:shop_id>/save-fcm-token/',
          SaveFCMTokenView.as_view(), name='save_fcm_token'),
+    path('<str:shop_id>/notifications/',
+         AllNotificationsView.as_view(), name="notifications")
 ]

@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+import dj_database_url
 from datetime import timedelta
 from firebase_admin import credentials
 import firebase_admin
@@ -8,15 +10,18 @@ from environ import Env
 
 BASE_DIR = Path(__file__).resolve().parent.parent  # keep for general use
 env = Env()
-env.read_env(Path(__file__).resolve().parent / ".env")  # <- same folder as settings.py
+# <- same folder as settings.py
+env.read_env(Path(__file__).resolve().parent / ".env")
 
 
 SECRET_KEY = env("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
+DEBUG = True
 
 ALLOWED_HOSTS = ['bamina.onrender.com']
+if DEBUG:
+    ALLOWED_HOSTS += ['localhost']
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 STATIC_URL = "/static/"
@@ -36,11 +41,12 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'rest_framework_simplejwt.token_blacklist',  # Token authentication
     'manager',
-    'corsheaders', 
-    'debug_toolbar',
+    'corsheaders',
+    'debug_toolbar',  # Ensure this is added if you have a payment app
+    # Ensure this is added if you have a payment app
+
     'cloudinary',
-    'cloudinary_storage',# Ensure this is added if you have a payment app
- # Ensure this is added if you have a payment app
+    'cloudinary_storage',
 ]
 
 INTERNAL_IPS = [
@@ -49,11 +55,14 @@ INTERNAL_IPS = [
 
 
 MIDDLEWARE = [
-    
+
     "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
+    # Ensure this is added for CORS support
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",
-    'debug_toolbar.middleware.DebugToolbarMiddleware',  # Ensure this is added for CORS support
+    # Ensure this is added for CORS support
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -87,11 +96,13 @@ WSGI_APPLICATION = "bamina.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-import dj_database_url
-import os
 
 DATABASES = {
-    "default": dj_database_url.config(default=os.getenv("DATABASE_URL"))
+    # "default": dj_database_url.config(default=os.getenv("DATABASE_URL"))
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+    }
 }
 
 
@@ -129,20 +140,6 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 
 
-# media files
-# import cloudinary
-# import cloudinary.uploader
-# import cloudinary.api
-
-# CLOUDINARY_STORAGE = {
-#     'CLOUD_NAME': 'your_cloud_name',
-#     'API_KEY': 'your_api_key',
-#     'API_SECRET': 'your_api_secret',
-# }
-
-# DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
-
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
@@ -170,7 +167,7 @@ REST_FRAMEWORK = {
 
 
 FIREBASE_CRED_PATH = os.path.join(
-    BASE_DIR, 'api', 'credentials', 'laba-5ac38-firebase-adminsdk-fbsvc-ac9af5a24f.json')
+    BASE_DIR, 'api', 'credentials', 'bamina-store-1879c-firebase-adminsdk-fbsvc-de2f419517.json')
 
 if not firebase_admin._apps:
     cred = credentials.Certificate(FIREBASE_CRED_PATH)
@@ -210,3 +207,31 @@ DEFAULT_FROM_EMAIL = 'Bamina Team <baminateam@gmail.com>'
 
 # oAuth settings
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
+
+
+# Media files (Supabase Storage)
+
+# load_dotenv()
+# DEFAULT_FILE_STORAGE = "core.storage_backends.SupabaseMediaStorage"
+
+# SUPABASE_URL = os.getenv("SUPABASE_URL")
+# SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET")
+
+# AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+# AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+# AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+# AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")
+
+
+# MEDIA_URL = f"{os.getenv('SUPABASE_URL')}/storage/v1/object/public/{os.getenv('SUPABASE_BUCKET')}/"
+
+
+# Media files (cloudinary)
+CLOUDINARY_STORAGE = {
+    'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME'),
+    'API_KEY': env('CLOUDINARY_API_KEY'),
+    'API_SECRET': env('CLOUDINARY_API_SECRET'),
+}
+
+DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'

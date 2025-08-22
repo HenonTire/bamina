@@ -2,6 +2,7 @@ import uuid
 from manager.models import Shop
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
+from cloudinary.models import CloudinaryField
 
 
 class CustomUserManager(BaseUserManager):
@@ -29,8 +30,8 @@ class CustomUserManager(BaseUserManager):
 
 class User(AbstractBaseUser, PermissionsMixin):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    profile_photo = models.ImageField(
-        upload_to="profile_photos/", default="profile_photos/default.png", blank=True, null=True)
+    profile_photo = CloudinaryField(
+        'profile_photo', blank=True, null=True, default="default_profile", folder="users/")
     username = models.CharField(max_length=100)
     shop = models.ForeignKey(
         Shop, on_delete=models.CASCADE, blank=True, null=True)

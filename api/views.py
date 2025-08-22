@@ -293,30 +293,18 @@ class PlaceOrderView(CreateAPIView):
             user=request.user, product__shop=shop).delete()
 
         # Send notification if token provided
-        try:
-            shop_fcm_token = request.data.get('shop_fcm_token')
-            if shop_fcm_token:
-                send_fcm_notification(
-                    shop_fcm_token,
-                    "🛒 New Order Placed",
-                    f"{request.user.username} just placed an order with total ${total_price}"
+        shop_owner = ShopOwner.objects.filter(shop=shop).first()
+        if shop_owner:
+            try:
+                data = send_fcm_notification(
+                    user=shop_owner.user,
+                    shop=shop,
+                    title="🛒 New Order Placed",
+                    body=f"{request.user.username} just placed an order in your shop."
                 )
-            else:
-                shop_owner = ShopOwner.objects.filter(shop=shop).first()
-                if shop_owner:
-                    tokens = FCMToken.objects.filter(
-                        user=shop_owner.user, shop=shop).values_list('token', flat=True)
-                    for token in tokens:
-                        try:
-                            send_fcm_notification(
-                                token,
-                                "🛒 New Order Placed",
-                                f"{request.user.username} just placed an order in your shop."
-                            )
-                        except Exception as e:
-                            print(f"Failed to send FCM to {token}: {e}")
-        except Exception as e:
-            print("Failed to send FCM:", str(e))
+                print(data)
+            except Exception as e:
+                print("Failed to send FCM:", e)
 
         return order
 
@@ -468,3 +456,13 @@ class SaveFCMTokenView(APIView):
             FCMToken.objects.update_or_create(
                 user=request.user, token=token, shop=Shop.objects.get(shope_id=shop_id))
         return Response({"message": "Token saved"})
+
+
+class AllNotificationsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, shop_id):
+        notifications = Notification.objects.filter(
+            user=request.user, shop_id=Shop.objects.get(shope_id=shop_id))
+        serializer = NotificationSerializer(notifications, many=True)
+        return Response(serializer.data)
