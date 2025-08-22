@@ -37,7 +37,9 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',  # Token authentication
     'manager',
     'corsheaders', 
-    'debug_toolbar',# Ensure this is added if you have a payment app
+    'debug_toolbar',
+    'cloudinary',
+    'cloudinary_storage',# Ensure this is added if you have a payment app
  # Ensure this is added if you have a payment app
 ]
 
@@ -128,8 +130,18 @@ USE_TZ = True
 
 
 # media files
-MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# import cloudinary
+# import cloudinary.uploader
+# import cloudinary.api
+
+# CLOUDINARY_STORAGE = {
+#     'CLOUD_NAME': 'your_cloud_name',
+#     'API_KEY': 'your_api_key',
+#     'API_SECRET': 'your_api_secret',
+# }
+
+# DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
