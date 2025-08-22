@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+import dj_database_url
 from datetime import timedelta
 from firebase_admin import credentials
 import firebase_admin
@@ -15,11 +17,13 @@ env.read_env(Path(__file__).resolve().parent / ".env")
 SECRET_KEY = env("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['bamina.onrender.com']
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-
+STATIC_URL = "/static/"
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 # Application definition
 
 INSTALLED_APPS = [
@@ -49,6 +53,9 @@ MIDDLEWARE = [
 
     "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
+    # Ensure this is added for CORS support
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     # Ensure this is added for CORS support
     'debug_toolbar.middleware.DebugToolbarMiddleware',
     "django.middleware.security.SecurityMiddleware",
@@ -84,11 +91,9 @@ WSGI_APPLICATION = "bamina.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
+
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    "default": dj_database_url.config(default=os.getenv("DATABASE_URL"))
 }
 
 
@@ -124,13 +129,7 @@ USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.1/howto/static-files/
-STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / 'static'
 
-# media files
-MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -199,3 +198,21 @@ DEFAULT_FROM_EMAIL = 'Bamina Team <baminateam@gmail.com>'
 
 # oAuth settings
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
+
+
+# Media files (Supabase Storage)
+
+load_dotenv()
+DEFAULT_FILE_STORAGE = "core.storage_backends.SupabaseMediaStorage"
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET")
+
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")
+
+
+MEDIA_URL = f"{os.getenv('SUPABASE_URL')}/storage/v1/object/public/{os.getenv('SUPABASE_BUCKET')}/"
