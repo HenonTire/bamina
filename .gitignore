@@ -4,7 +4,7 @@ db.sqlite3
 *.pyc
 __pycache__/
 
-/api/credentials/*.json
+# /api/credentials/*.json
 ### OSX ###
 .DS_Store
 .AppleDouble
