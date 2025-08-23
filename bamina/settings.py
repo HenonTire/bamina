@@ -224,10 +224,11 @@ GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
 
 
 # Media files ()
-
+CLOUDINARY = {
     'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME'),
     'API_KEY': env('CLOUDINARY_API_KEY'),
     'API_SECRET': env('CLOUDINARY_API_SECRET'),
 }
+
 
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
