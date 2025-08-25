@@ -17,7 +17,7 @@ env.read_env(Path(__file__).resolve().parent / ".env")
 SECRET_KEY = env("SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
 ALLOWED_HOSTS = ['bamina.onrender.com']
 if DEBUG:
@@ -192,7 +192,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5500",
     "http://127.0.0.1:5501",
     "http://localhost:5501",    # plain HTML/JS dev
-    "https://your-frontend-site.com",
+    "https://bamina.vercel.app",
     # production
 ]
 
@@ -223,29 +223,12 @@ DEFAULT_FROM_EMAIL = 'Bamina Team <baminateam@gmail.com>'
 GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
 
 
-# Media files (Supabase Storage)
-
-# load_dotenv()
-# DEFAULT_FILE_STORAGE = "core.storage_backends.SupabaseMediaStorage"
-
-# SUPABASE_URL = os.getenv("SUPABASE_URL")
-# SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-# SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET")
-
-# AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-# AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-# AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
-# AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")
-
-
-# MEDIA_URL = f"{os.getenv('SUPABASE_URL')}/storage/v1/object/public/{os.getenv('SUPABASE_BUCKET')}/"
-
-
-# Media files (cloudinary)
-CLOUDINARY_STORAGE = {
+# Media files ()
+CLOUDINARY = {
     'CLOUD_NAME': env('CLOUDINARY_CLOUD_NAME'),
     'API_KEY': env('CLOUDINARY_API_KEY'),
     'API_SECRET': env('CLOUDINARY_API_SECRET'),
 }
+
 
 DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
