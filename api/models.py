@@ -33,6 +33,7 @@ class Products(models.Model):
         decimal_places=2, max_digits=10, blank=True, null=True)
     size = models.CharField(
         max_length=30, choices=Size.choices, default=Size.MEDIUM)
+    is_sold_out = models.BooleanField(default=False)
     category = models.CharField(max_length=50, choices=Category,
                                 default=Category.CLOTHES, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)

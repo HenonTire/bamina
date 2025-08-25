@@ -288,6 +288,9 @@ class PlaceOrderView(CreateAPIView):
                 price=item.product.price,
             )
 
+            item.product.is_sold_out = True
+            item.product.save()
+
         # Clear the cart after order placed
         CartItem.objects.filter(
             user=request.user, product__shop=shop).delete()
