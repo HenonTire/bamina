@@ -141,11 +141,9 @@ class ListShopUsers(APIView):
         try:
             shop = Shop.objects.get(shope_id=shop_id)
             # users = User.objects.filter(shopowner__shop=shop)
-            all_users = User.objects.filter(shop=shop)
-
             owners = User.objects.filter(shopowner__shop=shop)
-            users = all_users.exclude(
-                id__in=owners.values_list('id', flat=True))
+            all_users = User.objects.filter(shop=shop)
+            users = (all_users | owners).distinct()
 
             user_data = []
             for user in users:

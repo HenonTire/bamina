@@ -99,3 +99,8 @@ __pycache__/
 
 # media files
 media/
+api/credentials/
+
+.env
+
+*.env

@@ -4,7 +4,8 @@ from .serializer import *
 from rest_framework.generics import *
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework.exceptions import ValidationError
 from .utils import send_fcm_notification
@@ -12,6 +13,21 @@ from rest_framework.exceptions import NotFound
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from manager.models import ShopOwner
+from manager.permission import IsSeller
+from .services import (
+    add_to_cart,
+    checkout,
+    collect_cod,
+    create_settlements,
+    get_cart,
+    get_or_create_variant,
+    marketplace_shop,
+    remove_cart_item,
+    transition_delivery,
+    transition_order,
+    transition_product,
+    update_cart_item,
+)
 
 
 class ListProducts(ListAPIView):
@@ -246,10 +262,15 @@ class PlaceOrderView(CreateAPIView):
         shop_id = self.kwargs.get('shop_id')
 
         shipping_address_id = request.data.get("shipping_address_id")
-        if not shipping_address_id:
-            raise ValidationError("Shipping address is required")
-        shipping_address = get_object_or_404(
-            Adress, id=shipping_address_id, user=request.user)
+        if shipping_address_id:
+            shipping_address = get_object_or_404(
+                Adress, id=shipping_address_id, user=request.user)
+        else:
+            legacy_address = request.data.get('shipping_address')
+            if not legacy_address:
+                raise ValidationError("Shipping address is required")
+            shipping_address = Adress.objects.create(
+                user=request.user, address=legacy_address)
 
         # Validate shop
         shop = get_object_or_404(Shop, shope_id=shop_id)
@@ -344,12 +365,14 @@ class OrderSingleProductView(APIView):
         product = get_object_or_404(Products, id=product_id, shop=shop)
 
         shipping_address_id = request.data.get("shipping_address_id")
-        if not shipping_address_id:
-            return Response({"error": "Shipping address is required"}, status=400)
-        shipping_address = get_object_or_404(
-            Adress, id=shipping_address_id, user=request.user)
-        shop_fcm_token = request.data.get('shop_fcm_token')
-
+        if shipping_address_id:
+            shipping_address = get_object_or_404(
+                Adress, id=shipping_address_id, user=request.user)
+        else:
+            legacy_address = request.data.get('shipping_address')
+            if not legacy_address:
+                return Response({"error": "Shipping address is required"}, status=400)
+            shipping_address = Adress.objects.create(user=request.user, address=legacy_address)
         order = Order.objects.create(
             user=request.user,
             shop=shop,
@@ -362,17 +385,19 @@ class OrderSingleProductView(APIView):
         OrderItem.objects.create(
             order=order, product=product, quantity=1, price=product.price)
 
-        if shop_fcm_token:
+        shop_owner = ShopOwner.objects.filter(shop=shop).first()
+        if shop_owner:
             try:
                 send_fcm_notification(
-                    shop_fcm_token,
-                    "🛒 New Order Placed",
-                    f"{request.user.username} just placed an order with total ${product.price}"
+                    user=shop_owner.user,
+                    shop=shop,
+                    title="New Order Placed",
+                    body=f"{request.user.username} just placed an order with total {product.price}",
                 )
             except Exception as e:
                 print("Failed to send FCM:", str(e))
 
-        serializer = ProductSerializer(order)
+        serializer = OrderSerializer(order)
         return Response(serializer.data)
 
 
@@ -469,3 +494,228 @@ class AllNotificationsView(APIView):
             user=request.user, shop_id=Shop.objects.get(shope_id=shop_id))
         serializer = NotificationSerializer(notifications, many=True)
         return Response(serializer.data)
+
+
+class CoreProductListView(ListAPIView):
+    serializer_class = CoreProductSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        shop = marketplace_shop()
+        queryset = Products.objects.filter(status=Products.Status.APPROVED)
+        if shop:
+            queryset = queryset.filter(shop=shop)
+        category = self.request.query_params.get('category')
+        query = self.request.query_params.get('q')
+        if category:
+            queryset = queryset.filter(category=category)
+        if query:
+            queryset = queryset.filter(Q(name__icontains=query) | Q(description__icontains=query))
+        return queryset.prefetch_related('variants__inventory').order_by('-created_at')
+
+
+class CoreProductDetailView(RetrieveAPIView):
+    serializer_class = CoreProductSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return Products.objects.filter(status=Products.Status.APPROVED).prefetch_related('variants__inventory')
+
+
+class CategoryListView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        categories = Products.objects.filter(status=Products.Status.APPROVED).values_list('category', flat=True).distinct()
+        return Response(sorted(value for value in categories if value))
+
+
+class ProductVariantListView(ListAPIView):
+    serializer_class = VariantSerializer
+    permission_classes = [AllowAny]
+
+    def get_queryset(self):
+        return ProductVariant.objects.filter(product_id=self.kwargs['product_id'], product__status=Products.Status.APPROVED, is_active=True)
+
+
+class CoreCartView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        cart = get_cart(request.user)
+        return Response(CoreCartItemSerializer(cart.items.select_related('variant__product').all(), many=True).data)
+
+
+class CoreCartItemCreateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = AddCartItemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = add_to_cart(request.user, **serializer.validated_data)
+        return Response(CoreCartItemSerializer(item).data, status=status.HTTP_201_CREATED)
+
+
+class CoreCartItemDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk):
+        serializer = UpdateCartItemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = update_cart_item(request.user, pk, serializer.validated_data['quantity'])
+        return Response(CoreCartItemSerializer(item).data)
+
+    def delete(self, request, pk):
+        remove_cart_item(request.user, pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CheckoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = CheckoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        address = get_object_or_404(Adress, pk=serializer.validated_data.pop('shipping_address_id'), user=request.user)
+        key = request.headers.get('Idempotency-Key') or request.data.get('idempotency_key')
+        order = checkout(request.user, address, key, **serializer.validated_data)
+        return Response(CoreOrderSerializer(order).data, status=status.HTTP_201_CREATED)
+
+
+class CoreOrderListView(ListAPIView):
+    serializer_class = CoreOrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Order.objects.filter(user=self.request.user).prefetch_related('items', 'payment', 'delivery').order_by('-created_at')
+
+
+class CoreOrderDetailView(RetrieveAPIView):
+    serializer_class = CoreOrderSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Order.objects.filter(user=self.request.user).prefetch_related('items', 'payment', 'delivery')
+
+
+class CancelOrderView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order, pk=pk, user=request.user)
+        order = transition_order(order, OrderStatus.CANCELLED)
+        return Response(CoreOrderSerializer(order).data)
+
+
+class CoreAddressListView(ListCreateAPIView):
+    serializer_class = CoreAddressSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Adress.objects.filter(user=self.request.user).order_by('-is_default', '-created_at')
+
+
+class CoreAddressDetailView(RetrieveUpdateDestroyAPIView):
+    serializer_class = CoreAddressSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return Adress.objects.filter(user=self.request.user)
+
+
+class SellerProductListView(ListCreateAPIView):
+    serializer_class = SellerProductSerializer
+    permission_classes = [IsSeller]
+
+    def get_queryset(self):
+        return Products.objects.filter(seller=self.request.user.seller_profile).prefetch_related('variants')
+
+    def perform_create(self, serializer):
+        shop = marketplace_shop()
+        if not shop:
+            raise ValidationError('The marketplace shop is not configured.')
+        price = serializer.validated_data.pop('price')
+        sku = serializer.validated_data.pop('sku')
+        initial_stock = serializer.validated_data.pop('initial_stock')
+        product = serializer.save(shop=shop, seller=self.request.user.seller_profile, status=Products.Status.DRAFT)
+        variant = ProductVariant.objects.create(product=product, name='Default', sku=sku, price=price)
+        Inventory.objects.create(variant=variant, quantity_available=initial_stock)
+
+
+class SellerProductDetailView(RetrieveUpdateAPIView):
+    serializer_class = SellerProductSerializer
+    permission_classes = [IsSeller]
+
+    def get_queryset(self):
+        return Products.objects.filter(seller=self.request.user.seller_profile)
+
+    def perform_update(self, serializer):
+        product = self.get_object()
+        if product.status not in {Products.Status.DRAFT, Products.Status.REJECTED}:
+            raise ValidationError('Only draft or rejected products can be edited.')
+        serializer.save(status=Products.Status.DRAFT)
+
+
+class SellerProductSubmitView(APIView):
+    permission_classes = [IsSeller]
+
+    def post(self, request, pk):
+        product = get_object_or_404(Products, pk=pk, seller=request.user.seller_profile)
+        product = transition_product(product, Products.Status.PENDING_REVIEW)
+        return Response(CoreProductSerializer(product).data)
+
+
+class AdminProductTransitionView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        product = get_object_or_404(Products, pk=pk)
+        product = transition_product(product, request.data.get('status'))
+        return Response(CoreProductSerializer(product).data)
+
+
+class SellerOrderListView(ListAPIView):
+    serializer_class = CoreOrderSerializer
+    permission_classes = [IsSeller]
+
+    def get_queryset(self):
+        return Order.objects.filter(items__seller=self.request.user.seller_profile).distinct().prefetch_related('items', 'payment', 'delivery')
+
+
+class SellerSettlementListView(ListAPIView):
+    serializer_class = serializers.ModelSerializer
+    permission_classes = [IsSeller]
+
+    def get(self, request, *args, **kwargs):
+        settlements = Settlement.objects.filter(seller=request.user.seller_profile).order_by('-created_at')
+        return Response([
+            {'id': item.id, 'order': item.order_id, 'amount': item.amount, 'platform_fee': item.platform_fee, 'delivery_amount': item.delivery_amount, 'status': item.status}
+            for item in settlements
+        ])
+
+
+class AdminOrderTransitionView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        order = get_object_or_404(Order, pk=pk)
+        order = transition_order(order, request.data.get('status'))
+        return Response(CoreOrderSerializer(order).data)
+
+
+class AdminDeliveryTransitionView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        delivery = get_object_or_404(Delivery, pk=pk)
+        delivery = transition_delivery(delivery, request.data.get('status'), request.data.get('failure_reason', ''))
+        return Response({'id': delivery.id, 'status': delivery.status, 'order': delivery.order_id})
+
+
+class AdminCollectCODView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        payment = get_object_or_404(Payment, pk=pk)
+        payment = collect_cod(payment)
+        return Response({'id': payment.id, 'status': payment.status, 'collected_at': payment.collected_at})

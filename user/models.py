@@ -29,10 +29,18 @@ class CustomUserManager(BaseUserManager):
 
 
 class User(AbstractBaseUser, PermissionsMixin):
+    class Role(models.TextChoices):
+        CUSTOMER = 'customer', 'Customer'
+        SELLER = 'seller', 'Seller'
+        ADMIN = 'admin', 'Admin'
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile_photo = CloudinaryField(
         'profile_photo', blank=True, null=True, default="default_profile", folder="users/")
     username = models.CharField(max_length=100)
+    phone_number = models.CharField(max_length=20, blank=True, default='')
+    first_name = models.CharField(max_length=100, blank=True, default='')
+    last_name = models.CharField(max_length=100, blank=True, default='')
     shop = models.ForeignKey(
         Shop, on_delete=models.CASCADE, blank=True, null=True)
     email = models.EmailField(unique=True)
@@ -40,6 +48,9 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.CUSTOMER)
+    is_verified = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
 
     objects = CustomUserManager()
 
@@ -48,3 +59,30 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def __str__(self):
         return self.email
+
+
+class SellerProfile(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        ACTIVE = 'active', 'Active'
+        SUSPENDED = 'suspended', 'Suspended'
+        REJECTED = 'rejected', 'Rejected'
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='seller_profile')
+    display_name = models.CharField(max_length=255)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.display_name
+
+
+class TelegramAccount(models.Model):
+    telegram_user_id = models.BigIntegerField(unique=True)
+    telegram_username = models.CharField(max_length=255, blank=True, default='')
+    user = models.OneToOneField(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                related_name='telegram_account')
+    is_verified = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)

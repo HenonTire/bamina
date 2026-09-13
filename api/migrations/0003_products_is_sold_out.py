@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0002_alter_products_image'),
+        ('api', '0002_initial'),
     ]
 
     operations = [

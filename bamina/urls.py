@@ -12,6 +12,7 @@ urlpatterns = [
     path('auth/', include('user.urls')),
     path('manage/', include('manager.urls')),
     path('api/', include('api.urls')),
+    path('telegram/', include('telegram_bot.urls')),
     path('health/', health, name='health'),
 ]
 
