@@ -15,6 +15,7 @@ from api.services import (
     add_to_cart,
     checkout,
     create_seller_product,
+    generate_unique_sku,
     get_cart,
     remove_cart_item,
     update_cart_item,
@@ -61,6 +62,12 @@ class TelegramClient:
         if reply_markup:
             payload['reply_markup'] = reply_markup
         return self.call('sendMessage', payload)
+
+    def send_photo(self, chat_id, photo, caption='', reply_markup=None):
+        payload = {'chat_id': chat_id, 'photo': photo, 'caption': caption, 'parse_mode': 'HTML'}
+        if reply_markup:
+            payload['reply_markup'] = reply_markup
+        return self.call('sendPhoto', payload)
 
     def answer_callback(self, callback_id, text=''):
         return self.call('answerCallbackQuery', {'callback_query_id': callback_id, 'text': text})
@@ -193,17 +200,16 @@ def customer_addresses(user):
 
 
 def create_address(user, data):
-    return Adress.objects.create(
+    area = data['area'].strip()
+    phone_number = data['phone_number'].strip()
+    address, _ = Adress.objects.get_or_create(
         user=user,
-        full_name=data.get('full_name', ''),
-        phone_num=data.get('phone_number', ''),
-        region=data.get('region', ''),
-        city=data.get('city', ''),
-        area=data.get('area', ''),
-        address=data.get('address_line', ''),
-        address_line=data.get('address_line', ''),
-        delivery_note=data.get('delivery_note', ''),
+        city='Hossana',
+        area=area,
+        phone_num=phone_number,
+        defaults={'address': area, 'address_line': area},
     )
+    return address
 
 
 def create_seller_for_account(account, name, phone, display_name):
@@ -244,8 +250,8 @@ def create_product_from_state(account, data, status=Products.Status.APPROVED):
         name=data['name'],
         description=data['description'],
         category=data['category'],
-        variant_name=data.get('variant_name', 'Default'),
-        sku=data['sku'],
+        variant_name='Default',
+        sku=generate_unique_sku(),
         price=parse_decimal(data['price']),
         stock=parse_positive_int(data['stock']),
         slug=slugify(data['name']),

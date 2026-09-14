@@ -21,7 +21,7 @@ def categories(categories):
 
 def product(product):
     return {'inline_keyboard': [
-        [button('🛒 Add to Cart', f'product:{product.id}')],
+        [button('🛒 Add to Cart', f'add:{product.id}')],
         [button('⚡ Buy Now', f'buy:{product.id}')],
         [button('↩️ Back', 'shop')],
     ]}

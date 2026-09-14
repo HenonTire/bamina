@@ -53,6 +53,17 @@ def _send(chat_id, text, markup=None):
         return None
 
 
+def _send_product(chat_id, product, text, markup=None):
+    image = getattr(product, 'image', None)
+    image_url = getattr(image, 'url', None) if image else None
+    if image_url:
+        try:
+            return telegram_sender().send_photo(chat_id, image_url, text, markup)
+        except TelegramAPIError:
+            logger.exception('Unable to send Telegram product photo')
+    return _send(chat_id, text, markup)
+
+
 def _main(account, chat_id, text='Welcome to Beminet 👋'):
     _send(chat_id, text, keyboards.main_menu(account))
 
@@ -64,31 +75,60 @@ def _callback(chat_id, callback_id, text=''):
         logger.exception('Unable to answer Telegram callback')
 
 
-def _category_values():
-    return list(
-        Products.objects.filter(status=Products.Status.APPROVED)
-        .values_list('category', flat=True)
+SHOP_PAGE_SIZE = 8
+
+
+def _available_products():
+    return (
+        Products.objects.filter(
+            status=Products.Status.APPROVED,
+            is_sold_out=False,
+            variants__is_active=True,
+        )
+        .prefetch_related('variants')
         .distinct()
+        .order_by('-created_at', '-id')
     )
 
 
-def _show_shop(chat_id):
-    _send(chat_id, '🏷 <b>Categories</b>', keyboards.categories(_category_values()))
+def _show_shop(chat_id, page=0):
+    products = list(_available_products()[page * SHOP_PAGE_SIZE:(page + 1) * SHOP_PAGE_SIZE + 1])
+    has_next = len(products) > SHOP_PAGE_SIZE
+    products = products[:SHOP_PAGE_SIZE]
+    if not products and page == 0:
+        _send(chat_id, 'No products are available right now.')
+        return
+    for product in products:
+        variants = list(product.variants.filter(is_active=True))
+        price = min((variant.price for variant in variants), default=product.price)
+        _send_product(
+            chat_id,
+            product,
+            f'<b>{html.escape(product.name)}</b>\n{money(price)}',
+            {'inline_keyboard': [[{'text': 'View product', 'callback_data': f'product:{product.id}'}]]},
+        )
+    rows = []
+    if page:
+        rows.append([{'text': 'Previous', 'callback_data': f'shop_page:{page - 1}'}])
+    if has_next:
+        rows.append([{'text': 'Next', 'callback_data': f'shop_page:{page + 1}'}])
+    if rows:
+        _send(chat_id, 'Browse products:', {'inline_keyboard': rows})
 
 
 def _show_category(chat_id, category):
-    products = Products.objects.filter(status=Products.Status.APPROVED, category=category).prefetch_related('variants')
+    products = _available_products().filter(category=category)
     rows = [[{'text': item.name, 'callback_data': f'product:{item.id}'}] for item in products]
     rows.append([{'text': '↩️ Back', 'callback_data': 'shop'}])
     _send(chat_id, f'🏷 <b>{html.escape(category.title())}</b>', {'inline_keyboard': rows})
 
 
 def _show_product(chat_id, product_id):
-    product = Products.objects.filter(pk=product_id, status=Products.Status.APPROVED).first()
+    product = _available_products().filter(pk=product_id).first()
     if not product:
         _send(chat_id, 'Sorry, this product is currently unavailable.')
         return
-    _send(chat_id, product_text(product), keyboards.product(product))
+    _send_product(chat_id, product, product_text(product), keyboards.product(product))
     variants = list(product.variants.filter(is_active=True).order_by('id'))
     if len(variants) > 1:
         _send(chat_id, 'Choose a variant:', keyboards.variants(variants, product.id))
@@ -180,7 +220,7 @@ def _show_settlements(account, chat_id):
 
 
 def _address_prompt(account, chat_id):
-    addresses = list(customer_addresses(account.user)[:10])
+    addresses = list(customer_addresses(account.user).filter(city='Hossana')[:10])
     rows = [[{'text': f'{item.city or item.address[:30]} · {item.phone_num}', 'callback_data': f'address:{item.id}'}] for item in addresses]
     rows.append([{'text': '➕ New Address', 'callback_data': 'new_address'}])
     rows.append([{'text': '❌ Cancel', 'callback_data': 'home'}])
@@ -232,6 +272,15 @@ def _handle_text(account, chat_id, text):
         profile = create_seller_for_account(account, data['name'], data['phone'], text)
         clear_state(account)
         _send(chat_id, f'✅ Seller application submitted. Status: <b>{profile.status}</b>', keyboards.main_menu(account))
+    elif state.state == 'address_area':
+        data['area'] = text
+        set_state(account, 'address_phone', **data)
+        _send(chat_id, 'What phone number should we use for delivery?')
+    elif state.state == 'address_phone':
+        data['phone_number'] = text
+        address = create_address(account.user, data)
+        clear_state(account)
+        _checkout_summary(account, chat_id, address.id)
     elif state.state.startswith('address_'):
         fields = ['full_name', 'phone_number', 'region', 'city', 'area', 'address_line', 'delivery_note']
         index = int(state.state.split('_')[1])
@@ -256,14 +305,6 @@ def _handle_text(account, chat_id, text):
             _send(chat_id, 'Please enter shoes, clothes, or bags.')
             return
         data['category'] = text
-        set_state(account, 'product_variant', **data)
-        _send(chat_id, 'Enter the variant name, or Default.')
-    elif state.state == 'product_variant':
-        data['variant_name'] = text
-        set_state(account, 'product_sku', **data)
-        _send(chat_id, 'Enter a unique SKU.')
-    elif state.state == 'product_sku':
-        data['sku'] = text
         set_state(account, 'product_price', **data)
         _send(chat_id, 'Enter the price in ETB.')
     elif state.state == 'product_price':
@@ -316,14 +357,40 @@ def _handle_callback(account, chat_id, callback_id, data):
     elif data == 'shop':
         clear_state(account)
         _show_shop(chat_id)
+    elif data.startswith('shop_page:'):
+        _show_shop(chat_id, int(data.split(':', 1)[1]))
     elif data.startswith('category:'):
         _show_category(chat_id, data.split(':', 1)[1])
     elif data.startswith('product:'):
         _show_product(chat_id, int(data.split(':')[1]))
+    elif data.startswith('add:') or data.startswith('buy:'):
+        buy_now = data.startswith('buy:')
+        product = _available_products().filter(pk=int(data.split(':')[1])).first()
+        if not product:
+            _send(chat_id, 'Sorry, this product is currently unavailable.')
+            return
+        variants = list(product.variants.filter(is_active=True).order_by('id'))
+        if len(variants) != 1:
+            if buy_now:
+                set_state(account, f'buy_variant:{product.id}')
+            _send(chat_id, 'Choose a variant:', keyboards.variants(variants, product.id))
+            return
+        try:
+            add_to_cart(account.user, variants[0].id, 1)
+            if buy_now:
+                _address_prompt(account, chat_id)
+            else:
+                _send(chat_id, 'Added to cart.', {'inline_keyboard': [[{'text': 'View Cart', 'callback_data': 'cart'}]]})
+        except Exception as exc:
+            _send(chat_id, safe_error(exc))
     elif data.startswith('variant:'):
         _, product_id, variant_id = data.split(':')
         try:
             add_to_cart(account.user, int(variant_id), 1)
+            if conversation(account).state == f'buy_variant:{product_id}':
+                clear_state(account)
+                _address_prompt(account, chat_id)
+                return
             _send(chat_id, '✅ Added to cart.', {'inline_keyboard': [[{'text': '🛒 View Cart', 'callback_data': 'cart'}, {'text': '🛍 Continue Shopping', 'callback_data': 'shop'}]]})
         except Exception as exc:
             _send(chat_id, safe_error(exc))
@@ -337,8 +404,8 @@ def _handle_callback(account, chat_id, callback_id, data):
     elif data.startswith('address:'):
         _checkout_summary(account, chat_id, int(data.split(':')[1]))
     elif data == 'new_address':
-        set_state(account, 'address_0')
-        _send(chat_id, 'Enter the recipient full name:')
+        set_state(account, 'address_area')
+        _send(chat_id, 'What area in Hossana are you in?')
     elif data == 'confirm_checkout':
         state = conversation(account)
         try:
@@ -381,7 +448,7 @@ def _handle_callback(account, chat_id, callback_id, data):
                 account,
                 state.data,
                 status=(
-                    Products.Status.APPROVED
+                    Products.Status.PENDING_REVIEW
                     if data == 'seller_product_submit'
                     else Products.Status.DRAFT
                 ),
@@ -390,6 +457,8 @@ def _handle_callback(account, chat_id, callback_id, data):
                 message = '✅ Product published and active.'
             else:
                 message = '📝 Product saved as draft.'
+            if data == 'seller_product_submit':
+                message = 'Product submitted for review.'
             clear_state(account)
             _send(chat_id, message, keyboards.main_menu(account))
         except Exception as exc:

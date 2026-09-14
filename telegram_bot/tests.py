@@ -1,5 +1,6 @@
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase, override_settings
@@ -11,7 +12,7 @@ from manager.models import Shop
 from user.models import SellerProfile, TelegramAccount, User
 
 from .services import create_product_from_state, get_or_create_account, set_state, store_telegram_photo
-from .views import process_update
+from .views import _send_product, _show_shop, process_update
 
 
 class TelegramBotTests(TestCase):
@@ -51,6 +52,57 @@ class TelegramBotTests(TestCase):
         account = TelegramAccount.objects.get(telegram_user_id=9001)
         self.assertEqual(account.user.cart.items.get().quantity, 1)
         self.assertGreaterEqual(send_message.call_count, 3)
+
+    @patch('telegram_bot.views._send_product')
+    def test_shop_lists_all_available_products_without_categories(self, send_product):
+        uncategorized = Products.objects.create(
+            shop=self.shop,
+            name='Uncategorized Bag',
+            description='A valid product without a category',
+            category=None,
+            price=Decimal('800.00'),
+            status=Products.Status.APPROVED,
+        )
+        uncategorized_variant = ProductVariant.objects.create(
+            product=uncategorized, name='Default', sku='UNCATEGORIZED-BAG', price=Decimal('800.00'),
+        )
+        Inventory.objects.create(variant=uncategorized_variant, quantity_available=2)
+
+        _show_shop(55)
+
+        listed_ids = {call.args[1].id for call in send_product.call_args_list}
+        self.assertEqual(listed_ids, {self.product.id, uncategorized.id})
+
+    @patch('telegram_bot.views.telegram_sender')
+    def test_product_image_is_sent_as_telegram_photo_when_available(self, telegram_sender):
+        product = SimpleNamespace(image=SimpleNamespace(url='https://res.cloudinary.com/demo/image/upload/product.jpg'))
+
+        _send_product(55, product, 'Product details')
+
+        telegram_sender.return_value.send_photo.assert_called_once_with(
+            55, 'https://res.cloudinary.com/demo/image/upload/product.jpg', 'Product details', None,
+        )
+
+    @patch('telegram_bot.views._send')
+    def test_checkout_address_flow_collects_only_hossana_area_and_phone(self, send):
+        account = get_or_create_account(self.user_data)
+        from api.services import add_to_cart
+        add_to_cart(account.user, self.variant.id, 1)
+
+        process_update({'update_id': 20, 'callback_query': {'id': 'checkout', 'from': self.user_data, 'message': {'chat': {'id': 55}}, 'data': 'checkout'}})
+        process_update({'update_id': 21, 'callback_query': {'id': 'new-address', 'from': self.user_data, 'message': {'chat': {'id': 55}}, 'data': 'new_address'}})
+        process_update({'update_id': 22, 'message': {'from': self.user_data, 'chat': {'id': 55}, 'text': 'Arada'}})
+        process_update({'update_id': 23, 'message': {'from': self.user_data, 'chat': {'id': 55}, 'text': '0911000000'}})
+
+        account.refresh_from_db()
+        address = Adress.objects.get(user=account.user, area='Arada')
+        self.assertEqual(address.city, 'Hossana')
+        self.assertEqual(address.phone_num, '0911000000')
+        self.assertEqual(account.conversation_state.state, 'checkout_confirm')
+        prompts = [call.args[1] for call in send.call_args_list]
+        self.assertIn('What area in Hossana are you in?', prompts)
+        self.assertIn('What phone number should we use for delivery?', prompts)
+        self.assertFalse(any('region' in prompt.lower() or 'street' in prompt.lower() for prompt in prompts))
 
     @override_settings(TELEGRAM_BOT_TOKEN='test-token')
     @patch('telegram_bot.services.TelegramClient.send_message')
@@ -133,8 +185,6 @@ class TelegramBotTests(TestCase):
             'name': 'Photo Shoes',
             'description': 'Shoes with a stored photo',
             'category': 'shoes',
-            'variant_name': 'Default',
-            'sku': 'PHOTO-SHOES-1',
             'price': '1200.00',
             'stock': '4',
             'image_public_id': 'products/telegram-photo',
@@ -144,6 +194,42 @@ class TelegramBotTests(TestCase):
         self.assertEqual(str(product.image), 'products/telegram-photo')
         self.assertEqual(product.seller_id, seller.id)
         self.assertEqual(product.status, Products.Status.APPROVED)
+        variant = product.variants.get()
+        self.assertEqual(variant.name, 'Default')
+        self.assertTrue(variant.sku.startswith('BEM-'))
+        self.assertEqual(variant.price, Decimal('1200.00'))
+        self.assertEqual(variant.inventory.quantity_available, 4)
+
+    @patch('telegram_bot.views._send')
+    @patch('telegram_bot.views.store_telegram_photo', return_value='products/simple-flow-photo')
+    def test_seller_simple_product_flow_submits_default_variant_for_review(self, store_photo, send):
+        seller_user = User.objects.create_user(email='simple-flow@example.com', username='simple-flow', password='pass')
+        seller = SellerProfile.objects.create(user=seller_user, display_name='Simple Flow Seller', status=SellerProfile.Status.ACTIVE)
+        TelegramAccount.objects.create(telegram_user_id=9005, user=seller_user)
+        telegram_user = {'id': 9005, 'username': 'simple-flow'}
+
+        process_update({'update_id': 50, 'callback_query': {'id': 'add', 'from': telegram_user, 'message': {'chat': {'id': 500}}, 'data': 'seller_add'}})
+        process_update({'update_id': 51, 'message': {'from': telegram_user, 'chat': {'id': 500}, 'text': 'Simple Shoes'}})
+        process_update({'update_id': 52, 'message': {'from': telegram_user, 'chat': {'id': 500}, 'text': 'Shoes for the MVP'}})
+        process_update({'update_id': 53, 'message': {'from': telegram_user, 'chat': {'id': 500}, 'photo': [{'file_id': 'photo', 'file_size': 10}]}})
+        process_update({'update_id': 54, 'message': {'from': telegram_user, 'chat': {'id': 500}, 'text': 'shoes'}})
+        process_update({'update_id': 55, 'message': {'from': telegram_user, 'chat': {'id': 500}, 'text': '900'}})
+        process_update({'update_id': 56, 'message': {'from': telegram_user, 'chat': {'id': 500}, 'text': '3'}})
+
+        account = TelegramAccount.objects.get(telegram_user_id=9005)
+        self.assertEqual(account.conversation_state.state, 'product_confirm')
+        self.assertNotIn('variant_name', account.conversation_state.data)
+        self.assertNotIn('sku', account.conversation_state.data)
+
+        process_update({'update_id': 57, 'callback_query': {'id': 'submit', 'from': telegram_user, 'message': {'chat': {'id': 500}}, 'data': 'seller_product_submit'}})
+
+        product = Products.objects.get(seller=seller, name='Simple Shoes')
+        variant = product.variants.get()
+        self.assertEqual(product.status, Products.Status.PENDING_REVIEW)
+        self.assertEqual(variant.name, 'Default')
+        self.assertTrue(variant.sku.startswith('BEM-'))
+        self.assertEqual(variant.price, Decimal('900'))
+        self.assertEqual(variant.inventory.quantity_available, 3)
 
     @patch('telegram_bot.views._send')
     @patch('telegram_bot.views.store_telegram_photo', return_value='products/photo-from-update')
