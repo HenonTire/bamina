@@ -30,6 +30,14 @@ def marketplace_shop():
     return Shop.objects.filter(is_active=True, is_marketplace=True).first() or Shop.objects.filter(is_active=True).order_by('id').first()
 
 
+def generate_unique_sku():
+    """Return a unique SKU for automatically-created product variants."""
+    while True:
+        sku = f'BEM-{uuid4().hex.upper()}'
+        if not ProductVariant.objects.filter(sku=sku).exists():
+            return sku
+
+
 def get_or_create_variant(product, variant=None):
     if variant is not None:
         if variant.product_id != product.id or not variant.is_active:
@@ -129,8 +137,8 @@ def checkout(user, shipping_address, idempotency_key, delivery_fee=Decimal('0'),
 
         cart = Cart.objects.select_for_update().get(user=user)
         items = list(
-            CartItem.objects.select_for_update()
-            .select_related('variant__product', 'variant__inventory', 'product__seller')
+            CartItem.objects.select_for_update(of=('self',))
+            .select_related('product', 'variant__product')
             .filter(cart=cart)
         )
         if not items:

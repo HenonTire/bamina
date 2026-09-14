@@ -59,6 +59,24 @@ class CoreCommerceServiceTests(TestCase):
         self.assertEqual(order.items.get().seller_id, self.seller.id)
         self.assertEqual(Inventory.objects.get(variant=self.variant).quantity_reserved, 2)
 
+    def test_checkout_supports_beminet_owned_product_without_a_seller(self):
+        product = Products.objects.create(
+            shop=self.shop,
+            name='Beminet Bag',
+            description='Marketplace-owned bag',
+            price=Decimal('75.00'),
+            status=Products.Status.APPROVED,
+            seller=None,
+        )
+        variant = ProductVariant.objects.create(product=product, sku='BEM-BAG-1', price=Decimal('75.00'))
+        Inventory.objects.create(variant=variant, quantity_available=2)
+
+        add_to_cart(self.user, variant.id, 1)
+        order = checkout(self.user, self.address, 'beminet-owned-checkout')
+
+        self.assertIsNone(order.items.get().seller)
+        self.assertEqual(Inventory.objects.get(variant=variant).quantity_reserved, 1)
+
     def test_checkout_is_idempotent(self):
         add_to_cart(self.user, self.variant.id, 1)
         first = checkout(self.user, self.address, 'checkout-retry')
