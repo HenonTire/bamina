@@ -214,7 +214,7 @@ def create_seller_for_account(account, name, phone, display_name):
     user.save(update_fields=['first_name', 'phone_number', 'role', 'updated_at'])
     profile, _ = SellerProfile.objects.get_or_create(
         user=user,
-        defaults={'display_name': display_name[:255], 'status': SellerProfile.Status.PENDING},
+        defaults={'display_name': display_name[:255], 'status': SellerProfile.Status.ACTIVE},
     )
     if profile.display_name != display_name:
         profile.display_name = display_name[:255]
@@ -235,7 +235,7 @@ def seller_settlements(account):
     return Settlement.objects.filter(seller__user=account.user).select_related('order').order_by('-created_at')
 
 
-def create_product_from_state(account, data):
+def create_product_from_state(account, data, status=Products.Status.APPROVED):
     seller = getattr(account.user, 'seller_profile', None)
     if not seller or seller.status != SellerProfile.Status.ACTIVE:
         raise ValidationError('Your seller profile is not active yet.')
@@ -250,9 +250,12 @@ def create_product_from_state(account, data):
         stock=parse_positive_int(data['stock']),
         slug=slugify(data['name']),
     )
+    product.status = status
+    update_fields = ['status', 'updated_at']
     if data.get('image_public_id'):
         product.image = data['image_public_id']
-        product.save(update_fields=['image', 'updated_at'])
+        update_fields.insert(0, 'image')
+    product.save(update_fields=update_fields)
     notify_admins('New seller product', f'{product.name} was submitted by {seller.display_name}.')
     return product
 

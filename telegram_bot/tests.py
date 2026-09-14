@@ -91,7 +91,7 @@ class TelegramBotTests(TestCase):
         account = get_or_create_account(self.user_data)
         from .services import create_seller_for_account
         profile = create_seller_for_account(account, 'Jane', '0911000000', 'Jane Shop')
-        self.assertEqual(profile.status, SellerProfile.Status.PENDING)
+        self.assertEqual(profile.status, SellerProfile.Status.ACTIVE)
         self.assertIsNone(account.user.shop_id)
 
     def test_seller_orders_are_filtered_to_owned_items(self):
@@ -143,7 +143,7 @@ class TelegramBotTests(TestCase):
         product.refresh_from_db()
         self.assertEqual(str(product.image), 'products/telegram-photo')
         self.assertEqual(product.seller_id, seller.id)
-        self.assertEqual(product.status, Products.Status.DRAFT)
+        self.assertEqual(product.status, Products.Status.APPROVED)
 
     @patch('telegram_bot.views._send')
     @patch('telegram_bot.views.store_telegram_photo', return_value='products/photo-from-update')

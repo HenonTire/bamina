@@ -10,7 +10,7 @@ from django.views.decorators.http import require_POST
 from rest_framework.exceptions import ValidationError
 
 from api.models import Adress, ProductVariant, Products
-from api.services import add_to_cart, remove_cart_item, transition_product, update_cart_item
+from api.services import add_to_cart, remove_cart_item, update_cart_item
 
 from . import keyboards
 from .formatters import cart_text, money, order_text, product_text, tracking_text
@@ -377,10 +377,17 @@ def _handle_callback(account, chat_id, callback_id, data):
     elif data in ('seller_product_submit', 'seller_product_draft'):
         state = conversation(account)
         try:
-            product = create_product_from_state(account, state.data)
+            product = create_product_from_state(
+                account,
+                state.data,
+                status=(
+                    Products.Status.APPROVED
+                    if data == 'seller_product_submit'
+                    else Products.Status.DRAFT
+                ),
+            )
             if data == 'seller_product_submit':
-                product = transition_product(product, Products.Status.PENDING_REVIEW)
-                message = '✅ Product submitted for admin review.'
+                message = '✅ Product published and active.'
             else:
                 message = '📝 Product saved as draft.'
             clear_state(account)
