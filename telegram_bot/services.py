@@ -31,10 +31,39 @@ def notify_admins(title, body):
     shop = marketplace_shop()
     if not shop:
         return
-    for admin in User.objects.filter(is_staff=True, is_active=True):
-        Notification.objects.create(user=admin, shop=shop, title=title, body=body)
 
+    client = TelegramClient()
 
+    admins = User.objects.filter(
+        is_staff=True,
+        is_active=True,
+    ).select_related('telegram_account')
+
+    for admin in admins:
+        # Always create the in-app/database notification.
+        Notification.objects.create(
+            user=admin,
+            shop=shop,
+            title=title,
+            body=body,
+        )
+
+        # If this admin has connected Telegram, send the Telegram notification.
+        account = getattr(admin, 'telegram_account', None)
+
+        if not account:
+            continue
+
+        try:
+            client.send_message(
+                account.telegram_user_id,
+                f'<b>{title}</b>\n\n{body}',
+            )
+        except Exception:
+            logger.exception(
+                'Failed to send Telegram notification to admin %s',
+                admin.id,
+            )
 class TelegramAPIError(Exception):
     pass
 
