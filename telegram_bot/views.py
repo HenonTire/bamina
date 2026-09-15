@@ -177,14 +177,77 @@ def _show_seller(account, chat_id):
 
 
 def _show_seller_products(account, chat_id):
-    rows = []
-    for product in seller_products(account)[:20]:
-        variant = product.variants.first()
-        stock = variant.inventory.available_quantity if variant and hasattr(variant, 'inventory') else 0
-        rows.append([{'text': f'{product.name} · {product.status} · stock {stock}', 'callback_data': f'seller_product:{product.id}'}])
-    rows.append([{'text': '↩️ Seller Dashboard', 'callback_data': 'seller'}])
-    _send(chat_id, '📦 <b>My Products</b>', {'inline_keyboard': rows})
+    products = list(seller_products(account)[:20])
 
+    if not products:
+        _send(
+            chat_id,
+            '📦 <b>My Products</b>\n\n'
+            'You have not added any products yet.',
+            {
+                'inline_keyboard': [
+                    [{'text': '➕ Add Product', 'callback_data': 'seller_add'}],
+                    [{'text': '↩️ Seller Dashboard', 'callback_data': 'seller'}],
+                ]
+            },
+        )
+        return
+
+    for product in products:
+        variant = product.variants.first()
+
+        stock = (
+            variant.inventory.available_quantity
+            if variant and hasattr(variant, 'inventory')
+            else 0
+        )
+
+        status_labels = {
+            Products.Status.DRAFT: '📝 Draft',
+            Products.Status.PENDING_REVIEW: '⏳ Pending Review',
+            Products.Status.APPROVED: '✅ Approved',
+            Products.Status.REJECTED: '❌ Rejected',
+        }
+
+        status = status_labels.get(
+            product.status,
+            product.status.replace('_', ' ').title(),
+        )
+
+        text = (
+            f'<b>{html.escape(product.name)}</b>\n'
+            f'{status} · Stock: {stock}\n'
+            f'{money(product.price)}'
+        )
+
+        markup = {
+            'inline_keyboard': [
+                [
+                    {
+                        'text': '👁 View / Manage',
+                        'callback_data': f'seller_product:{product.id}',
+                    }
+                ]
+            ]
+        }
+
+        _send_product(
+            chat_id,
+            product,
+            text,
+            markup,
+        )
+
+    _send(
+        chat_id,
+        '📦 <b>My Products</b>',
+        {
+            'inline_keyboard': [
+                [{'text': '➕ Add Product', 'callback_data': 'seller_add'}],
+                [{'text': '↩️ Seller Dashboard', 'callback_data': 'seller'}],
+            ]
+        },
+    )
 
 def _show_seller_orders(account, chat_id):
     rows = []
@@ -299,12 +362,10 @@ def _handle_text(account, chat_id, text):
     elif state.state == 'product_description':
         data['description'] = text
         set_state(account, 'product_photo', **data)
-        _send(chat_id, 'Send one product photo. Telegram currently stores it as the product primary image.')
-    
-            
-        data['category'] = text
-        set_state(account, 'product_price', **data)
-        _send(chat_id, 'Enter the price in ETB.')
+        _send(
+            chat_id,
+            'Send one product photo. Telegram currently stores it as the product primary image.'
+        )
     elif state.state == 'product_price':
         data['price'] = text
         set_state(account, 'product_stock', **data)
@@ -348,10 +409,13 @@ def _handle_photo(account, chat_id, photos):
             keyboards.product_categories(),
         )
     except Exception as exc:
-        _send(chat_id, safe_error(exc))
+        _send(chat_id, safe_error(exc
+                                  ))
 
 
 def _handle_callback(account, chat_id, callback_id, data):
+    # Telegram requires every callback query to be answered.
+    # Answer it exactly once here.
     _callback(chat_id, callback_id)
     if data == 'home':
         clear_state(account)
@@ -392,11 +456,7 @@ def _handle_callback(account, chat_id, callback_id, data):
             **state_data,
         )
 
-        _callback(
-            chat_id,
-            callback_id,
-            f'Category: {allowed_categories[category]}',
-        )
+        
 
         _send(
             chat_id,
@@ -509,9 +569,186 @@ def _handle_callback(account, chat_id, callback_id, data):
             _send(chat_id, message, keyboards.main_menu(account))
         except Exception as exc:
             _send(chat_id, safe_error(exc))
+    elif data.startswith('seller_product_edit:'):
+        product_id = int(data.split(':', 1)[1])
+        product = seller_products(account).filter(pk=product_id).first()
+
+        if not product:
+            _send(chat_id, '❌ Product not found.')
+            return
+
+        _send(
+            chat_id,
+            f'✏️ <b>Edit {html.escape(product.name)}</b>\n\n'
+            'What would you like to change?',
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '📝 Name',
+                            'callback_data': f'seller_edit_name:{product.id}',
+                        },
+                    ],
+                    [
+                        {
+                            'text': '📄 Description',
+                            'callback_data': f'seller_edit_description:{product.id}',
+                        },
+                    ],
+                    [
+                        {
+                            'text': '💰 Price',
+                            'callback_data': f'seller_edit_price:{product.id}',
+                        },
+                    ],
+                    [
+                        {
+                            'text': '📦 Stock',
+                            'callback_data': f'seller_edit_stock:{product.id}',
+                        },
+                    ],
+                    [
+                        {
+                            'text': '📂 Category',
+                            'callback_data': f'seller_edit_category:{product.id}',
+                        },
+                    ],
+                    [
+                        {
+                            'text': '↩️ Back',
+                            'callback_data': f'seller_product:{product.id}',
+                        }
+                    ],
+                ]
+            },
+        )
+    elif data.startswith('seller_product_delete:'):
+            product_id = int(data.split(':', 1)[1])
+            product = seller_products(account).filter(pk=product_id).first()
+    
+            if not product:
+                _send(chat_id, '❌ Product not found.')
+                return
+    
+            _send(
+                chat_id,
+                f'⚠️ <b>Delete Product?</b>\n\n'
+                f'{html.escape(product.name)}\n\n'
+                'This action cannot be undone.',
+                {
+                    'inline_keyboard': [
+                        [
+                            {
+                                'text': '🗑 Yes, Delete',
+                                'callback_data': f'seller_product_delete_confirm:{product.id}',
+                            }
+                        ],
+                        [
+                            {
+                                'text': '❌ Cancel',
+                                'callback_data': f'seller_product:{product.id}',
+                            }
+                        ],
+                    ]
+                },
+        )
+    elif data.startswith('seller_product_delete_confirm:'):
+            product_id = int(data.split(':', 1)[1])
+    
+            product = seller_products(account).filter(pk=product_id).first()
+    
+            if not product:
+                _send(chat_id, '❌ Product not found.')
+                return
+    
+            product_name = product.name
+            product.delete()
+    
+            _send(
+                chat_id,
+                f'🗑 <b>{html.escape(product_name)}</b> was deleted.',
+                {
+                    'inline_keyboard': [
+                        [
+                            {
+                                'text': '📦 My Products',
+                                'callback_data': 'seller_products',
+                            }
+                        ],
+                        [
+                            {
+                                'text': '↩️ Seller Dashboard',
+                                'callback_data': 'seller',
+                            }
+                        ],
+                    ]
+                },
+            )
     elif data.startswith('seller_product:'):
-        product = seller_products(account).filter(pk=int(data.split(':')[1])).first()
-        _send(chat_id, f'{product.name}\nStatus: {product.status}' if product else 'Product not found.')
+        product_id = int(data.split(':', 1)[1])
+        product = seller_products(account).filter(pk=product_id).first()
+
+        if not product:
+            _send(chat_id, '❌ Product not found.')
+            return
+
+        variant = product.variants.first()
+
+        stock = (
+            variant.inventory.available_quantity
+            if variant and hasattr(variant, 'inventory')
+            else 0
+        )
+
+        status_labels = {
+            Products.Status.DRAFT: '📝 Draft',
+            Products.Status.PENDING_REVIEW: '⏳ Pending Review',
+            Products.Status.APPROVED: '✅ Approved',
+            Products.Status.REJECTED: '❌ Rejected',
+        }
+
+        status = status_labels.get(
+            product.status,
+            product.status.replace('_', ' ').title(),
+        )
+
+        text = (
+            f'📦 <b>{html.escape(product.name)}</b>\n\n'
+            f'<b>Status:</b> {status}\n'
+            f'<b>Category:</b> {html.escape(product.category or "Other")}\n'
+            f'<b>Price:</b> {money(product.price)}\n'
+            f'<b>Stock:</b> {stock}\n\n'
+            f'<b>Description:</b>\n'
+            f'{html.escape(product.description or "No description")}'
+        )
+
+        markup = {
+            'inline_keyboard': [
+                [
+                    {
+                        'text': '✏️ Edit',
+                        'callback_data': f'seller_product_edit:{product.id}',
+                    },
+                    {
+                        'text': '🗑 Delete',
+                        'callback_data': f'seller_product_delete:{product.id}',
+                    },
+                ],
+                [
+                    {
+                        'text': '↩️ My Products',
+                        'callback_data': 'seller_products',
+                    }
+                ],
+            ]
+        }
+
+        _send_product(
+            chat_id,
+            product,
+            text,
+            markup,
+        )
     elif data == 'cart_update' or data == 'cart_remove':
         cart = account.user.cart if hasattr(account.user, 'cart') else None
         items = list(cart.items.select_related('product', 'variant').all()) if cart else []
@@ -525,6 +762,7 @@ def _handle_callback(account, chat_id, callback_id, data):
     elif data.startswith('cartqty:'):
         set_state(account, f'cart_quantity:{int(data.split(":")[1])}')
         _send(chat_id, 'Enter the new positive quantity.')
+   
     elif data.startswith('cartremove:'):
         try:
             remove_cart_item(account.user, int(data.split(':')[1]))
