@@ -8,7 +8,7 @@ from django.utils.text import slugify
 from rest_framework.exceptions import ValidationError
 
 from manager.models import Shop
-from telegram_bot.services import notify_order_parties
+
 from user.models import SellerProfile
 
 from .models import (
@@ -38,7 +38,13 @@ def generate_unique_sku():
         if not ProductVariant.objects.filter(sku=sku).exists():
             return sku
 
+def _notify_order_parties_after_commit(order_id):
+    from telegram_bot.services import notify_order_parties
 
+    order = Order.objects.get(pk=order_id)
+    notify_order_parties(order)
+
+    
 def get_or_create_variant(product, variant=None):
     if variant is not None:
         if variant.product_id != product.id or not variant.is_active:
@@ -198,7 +204,9 @@ def checkout(user, shipping_address, idempotency_key, delivery_fee=Decimal('0'),
         create_delivery(order)
         items_qs = CartItem.objects.filter(cart=cart)
         items_qs.delete()
-    notify_order_parties(order)
+    transaction.on_commit(
+    lambda order_id=order.id: _notify_order_parties_after_commit(order_id)
+)
     return order
 
 
