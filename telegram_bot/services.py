@@ -26,7 +26,30 @@ from .models import ConversationState
 
 logger = logging.getLogger(__name__)
 
+def notify_admins_telegram(title, body):
+    admins = User.objects.filter(
+        is_staff=True,
+        is_active=True,
+    ).select_related('telegram_account')
 
+    client = TelegramClient()
+
+    for admin in admins:
+        account = getattr(admin, 'telegram_account', None)
+
+        if not account or not account.telegram_user_id:
+            continue
+
+        try:
+            client.send_message(
+                account.telegram_user_id,
+                f'<b>{title}</b>\n\n{body}',
+            )
+        except Exception:
+            logger.exception(
+                'Failed to notify admin %s via Telegram',
+                admin.id,
+            )
 def notify_admins(title, body):
     """
     Keep the existing database notification for staff users.
@@ -375,6 +398,10 @@ def create_product_from_state(account, data, status=Products.Status.APPROVED):
         product.image = data['image_public_id']
         update_fields.insert(0, 'image')
     product.save(update_fields=update_fields)
+    notify_admins_telegram(
+    '📦 New Seller Product',
+    f'{product.name} was submitted by {seller.display_name}.',
+)
     notify_admins('New seller product', f'{product.name} was submitted by {seller.display_name}.')
     return product
 
