@@ -6,7 +6,6 @@ import httpx
 from cloudinary import uploader
 from django.conf import settings
 from django.db import transaction
-from django.utils.text import slugify
 from rest_framework.exceptions import ValidationError
 
 from api.models import Adress, CartItem, Notification, Order, ProductVariant, Products, Settlement
@@ -390,7 +389,6 @@ def create_product_from_state(account, data, status=Products.Status.APPROVED):
         sku=generate_unique_sku(),
         price=parse_decimal(data['price']),
         stock=parse_positive_int(data['stock']),
-        slug=slugify(data['name']),
     )
     product.status = status
     update_fields = ['status', 'updated_at']

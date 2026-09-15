@@ -300,10 +300,8 @@ def _handle_text(account, chat_id, text):
         data['description'] = text
         set_state(account, 'product_photo', **data)
         _send(chat_id, 'Send one product photo. Telegram currently stores it as the product primary image.')
-    elif state.state == 'product_category':
-        if text not in ('shoes', 'clothes', 'bags'):
-            _send(chat_id, 'Please enter shoes, clothes, or bags.')
-            return
+    
+            
         data['category'] = text
         set_state(account, 'product_price', **data)
         _send(chat_id, 'Enter the price in ETB.')
@@ -344,7 +342,11 @@ def _handle_photo(account, chat_id, photos):
         data = dict(state.data)
         data['image_public_id'] = public_id
         set_state(account, 'product_category', **data)
-        _send(chat_id, '✅ Photo saved. Enter category: shoes, clothes, or bags.')
+        _send(
+            chat_id,
+            '✅ Photo saved.\n\n📂 <b>Choose a product category:</b>',
+            keyboards.product_categories(),
+        )
     except Exception as exc:
         _send(chat_id, safe_error(exc))
 
@@ -357,6 +359,50 @@ def _handle_callback(account, chat_id, callback_id, data):
     elif data == 'shop':
         clear_state(account)
         _show_shop(chat_id)
+    elif data.startswith('product_category:'):
+        category = data.split(':', 1)[1]
+
+        allowed_categories = {
+            'shoes': 'Shoes',
+            'clothes': 'Clothes',
+            'bags': 'Bags',
+            'beauty': 'Beauty',
+            'electronics': 'Electronics',
+            'home': 'Home & Living',
+            'accessories': 'Accessories',
+            'other': 'Other Category',
+        }
+
+        if category not in allowed_categories:
+            _send(chat_id, 'Invalid product category.')
+            return
+
+        state = conversation(account)
+
+        if state.state != 'product_category':
+            _send(chat_id, 'Please start adding a product first.')
+            return
+
+        state_data = dict(state.data)
+        state_data['category'] = category
+
+        set_state(
+            account,
+            'product_price',
+            **state_data,
+        )
+
+        _callback(
+            chat_id,
+            callback_id,
+            f'Category: {allowed_categories[category]}',
+        )
+
+        _send(
+            chat_id,
+            f'✅ Category: <b>{html.escape(allowed_categories[category])}</b>\n\n'
+            'Enter the price in ETB.',
+        )
     elif data.startswith('shop_page:'):
         _show_shop(chat_id, int(data.split(':', 1)[1]))
     elif data.startswith('category:'):

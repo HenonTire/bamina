@@ -15,9 +15,30 @@ def main_menu(account):
     return {'inline_keyboard': rows}
 
 
-def categories(categories):
-    return {'inline_keyboard': [[button(str(value).title(), f'category:{value}')] for value in categories] + [[button('↩️ Back', 'home')]]}
-
+def product_categories():
+    return {
+        'inline_keyboard': [
+            [
+                {'text': '👟 Shoes', 'callback_data': 'product_category:shoes'},
+                {'text': '👕 Clothes', 'callback_data': 'product_category:clothes'},
+            ],
+            [
+                {'text': '👜 Bags', 'callback_data': 'product_category:bags'},
+                {'text': '💄 Beauty', 'callback_data': 'product_category:beauty'},
+            ],
+            [
+                {'text': '📱 Electronics', 'callback_data': 'product_category:electronics'},
+                {'text': '🏠 Home & Living', 'callback_data': 'product_category:home'},
+            ],
+            [
+                {'text': '🎒 Accessories', 'callback_data': 'product_category:accessories'},
+                {'text': '📦 Other Category', 'callback_data': 'product_category:other'},
+            ],
+            [
+                {'text': '❌ Cancel', 'callback_data': 'home'},
+            ],
+        ]
+    }
 
 def product(product):
     return {'inline_keyboard': [

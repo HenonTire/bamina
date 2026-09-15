@@ -44,7 +44,7 @@ def _notify_order_parties_after_commit(order_id):
     order = Order.objects.get(pk=order_id)
     notify_order_parties(order)
 
-    
+
 def get_or_create_variant(product, variant=None):
     if variant is not None:
         if variant.product_id != product.id or not variant.is_active:
@@ -309,31 +309,78 @@ def transition_product(product, new_status):
         locked.save(update_fields=['status', 'updated_at'])
         return locked
 
+def generate_unique_product_slug(shop, name, exclude_product_id=None):
+    base_slug = slugify(name).strip() or 'product'
+    slug = base_slug
+    counter = 2
 
-def create_seller_product(seller, name, description, category, variant_name, sku, price, stock, slug=''):
+    queryset = Products.objects.filter(
+        shop=shop,
+        slug=slug,
+    )
+
+    if exclude_product_id:
+        queryset = queryset.exclude(pk=exclude_product_id)
+
+    while queryset.exists():
+        slug = f'{base_slug}-{counter}'
+        counter += 1
+
+        queryset = Products.objects.filter(
+            shop=shop,
+            slug=slug,
+        )
+
+        if exclude_product_id:
+            queryset = queryset.exclude(pk=exclude_product_id)
+
+    return slug
+def create_seller_product(
+    seller,
+    name,
+    description,
+    category,
+    variant_name,
+    sku,
+    price,
+    stock,
+    slug='',
+):
     if seller.status != SellerProfile.Status.ACTIVE:
         raise ValidationError('Seller profile is not active.')
+
     shop = marketplace_shop()
+
     if not shop:
         raise ValidationError('The marketplace shop is not configured.')
+
     with transaction.atomic():
         product = Products.objects.create(
             shop=shop,
             seller=seller,
             name=name,
-            slug=slug or None,
+            slug=generate_unique_product_slug(
+                shop=shop,
+                name=name,
+            ),
             description=description,
             price=price,
             category=category,
             status=Products.Status.DRAFT,
         )
+
         variant = ProductVariant.objects.create(
             product=product,
             name=variant_name or 'Default',
             sku=sku,
             price=price,
         )
-        Inventory.objects.create(variant=variant, quantity_available=stock)
+
+        Inventory.objects.create(
+            variant=variant,
+            quantity_available=stock,
+        )
+
     return product
 
 
