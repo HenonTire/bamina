@@ -8,6 +8,7 @@ from django.utils.text import slugify
 from rest_framework.exceptions import ValidationError
 
 from manager.models import Shop
+from telegram_bot.services import notify_order_parties
 from user.models import SellerProfile
 
 from .models import (
@@ -197,6 +198,7 @@ def checkout(user, shipping_address, idempotency_key, delivery_fee=Decimal('0'),
         create_delivery(order)
         items_qs = CartItem.objects.filter(cart=cart)
         items_qs.delete()
+    notify_order_parties(order)
     return order
 
 

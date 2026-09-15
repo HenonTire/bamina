@@ -28,41 +28,125 @@ logger = logging.getLogger(__name__)
 
 
 def notify_admins(title, body):
+    """
+    Keep the existing database notification for staff users.
+
+    Telegram notifications for orders are handled separately by
+    notify_order_parties().
+    """
     shop = marketplace_shop()
     if not shop:
         return
 
-    client = TelegramClient()
-
-    admins = User.objects.filter(
-        is_staff=True,
-        is_active=True,
-    ).select_related('telegram_account')
-
-    for admin in admins:
-        # Always create the in-app/database notification.
+    for admin in User.objects.filter(is_staff=True, is_active=True):
         Notification.objects.create(
             user=admin,
             shop=shop,
             title=title,
             body=body,
         )
+def notify_order_parties(order):
+    """
+    Notify the appropriate Telegram user about an order.
 
-        # If this admin has connected Telegram, send the Telegram notification.
-        account = getattr(admin, 'telegram_account', None)
+    - seller=None means the product belongs to Beminet, so notify staff/admin.
+    - seller!=None means the product belongs to that seller, so notify the seller.
+    """
 
-        if not account:
+    items = order.items.select_related(
+        'product',
+        'seller',
+    )
+
+    # Group seller notifications so a seller receives only ONE message
+    # even if the order contains multiple products from them.
+    sellers = {}
+    has_beminet_product = False
+
+    for item in items:
+        if item.seller_id is None:
+            has_beminet_product = True
+        else:
+            sellers[item.seller_id] = item.seller
+
+    client = TelegramClient()
+
+    # -------------------------
+    # Beminet-owned products
+    # -------------------------
+    if has_beminet_product:
+        admins = User.objects.filter(
+            is_staff=True,
+            is_active=True,
+        ).select_related('telegram_account')
+
+        message = (
+            f'<b>🛒 New Beminet Order</b>\n\n'
+            f'<b>Order:</b> {order.order_number}\n'
+            f'<b>Total:</b> {order.total} ETB\n'
+            f'<b>Customer:</b> {order.customer_phone or "Not provided"}\n\n'
+            f'An order contains a Beminet-owned product.'
+        )
+
+        for admin in admins:
+            account = getattr(admin, 'telegram_account', None)
+
+            if not account or not account.telegram_user_id:
+                continue
+
+            try:
+                client.send_message(
+                    account.telegram_user_id,
+                    message,
+                )
+            except Exception:
+                logger.exception(
+                    'Failed to notify admin %s about order %s',
+                    admin.id,
+                    order.order_number,
+                )
+
+    # -------------------------
+    # Seller-owned products
+    # -------------------------
+    for seller in sellers.values():
+        account = getattr(seller.user, 'telegram_account', None)
+
+        if not account or not account.telegram_user_id:
             continue
+
+        seller_items = [
+            item for item in order.items.all()
+            if item.seller_id == seller.id
+        ]
+
+        lines = [
+            '<b>🛒 New Order</b>',
+            '',
+            f'<b>Order:</b> {order.order_number}',
+            '',
+        ]
+
+        for item in seller_items:
+            lines.append(
+                f'• {item.product_name} × {item.quantity}'
+            )
+
+        lines.extend([
+            '',
+            '<b>Please check your order.</b>',
+        ])
 
         try:
             client.send_message(
                 account.telegram_user_id,
-                f'<b>{title}</b>\n\n{body}',
+                '\n'.join(lines),
             )
         except Exception:
             logger.exception(
-                'Failed to send Telegram notification to admin %s',
-                admin.id,
+                'Failed to notify seller %s about order %s',
+                seller.id,
+                order.order_number,
             )
 class TelegramAPIError(Exception):
     pass
