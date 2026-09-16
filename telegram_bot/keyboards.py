@@ -71,7 +71,61 @@ def admin_order_actions(order_id):
             ],
         ]
     }
+def admin_confirmed_order_actions(order_id):
+    return {
+        'inline_keyboard': [
+            [
+                button(
+                    '⚙️ Start Processing',
+                    f'admin_order_processing:{order_id}',
+                ),
+            ],
+            [
+                button(
+                    '📋 View Order',
+                    f'admin_order:{order_id}',
+                ),
+            ],
+        ]
+    }
 
+
+def admin_processing_order_actions(order_id):
+    return {
+        'inline_keyboard': [
+            [
+                button(
+                    '📦 Ready for Delivery',
+                    f'admin_order_ready:{order_id}',
+                ),
+            ],
+            [
+                button(
+                    '📋 View Order',
+                    f'admin_order:{order_id}',
+                ),
+            ],
+        ]
+    }
+
+
+def admin_ready_order_actions(order_id):
+    return {
+        'inline_keyboard': [
+            [
+                button(
+                    '🚚 Out for Delivery',
+                    f'admin_order_out:{order_id}',
+                ),
+            ],
+            [
+                button(
+                    '📋 View Order',
+                    f'admin_order:{order_id}',
+                ),
+            ],
+        ]
+    }
 
 def seller_order_actions(order_id):
     return {

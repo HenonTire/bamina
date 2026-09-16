@@ -7,7 +7,13 @@ from cloudinary import uploader
 from django.conf import settings
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
-from .keyboards import admin_order_actions, seller_order_actions
+from .keyboards import (
+    admin_order_actions,
+    admin_confirmed_order_actions,
+    admin_processing_order_actions,
+    admin_ready_order_actions,
+    seller_order_actions,
+)
 from api.models import Adress, CartItem, Notification, Order, ProductVariant, Products, Settlement
 from api.services import marketplace_shop
 from api.services import (
@@ -274,7 +280,8 @@ def notify_admins_order_status(order, action):
             'The seller has accepted this order.\n\n'
             f'<b>Order:</b> #{order.order_number}\n'
             f'<b>Total:</b> {order.total} ETB\n'
-            f'<b>Status:</b> {order.status}'
+            f'<b>Status:</b> {order.status}\n\n'
+            'The order is now waiting for admin processing.'
         )
 
     elif action == 'rejected':
@@ -304,6 +311,7 @@ def notify_admins_order_status(order, action):
             client.send_message(
                 account.telegram_user_id,
                 text,
+                admin_confirmed_order_actions(order.id),
             )
         except Exception:
             logger.exception(

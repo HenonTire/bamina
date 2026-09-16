@@ -26,6 +26,7 @@ from api.services import (
     transition_order,
 )
 from . import keyboards
+from .keyboards import admin_processing_order_actions, admin_ready_order_actions
 from .formatters import cart_text, money, order_text, product_text, tracking_text
 from .services import (
     TelegramAPIError,
@@ -47,6 +48,7 @@ from .services import (
     telegram_sender,
     checkout_for_account,
     notify_admins_order_status,
+    
 )
 
 logger = logging.getLogger(__name__)
@@ -1039,6 +1041,174 @@ def _handle_callback(account, chat_id, callback_id, data):
                         ],
                     ]
                 },
+        )
+    elif data.startswith('admin_order_processing:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to process orders.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(pk=order_id).first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.CONFIRMED:
+            _send(
+                chat_id,
+                f'⚠️ This order is <b>{order.status}</b>. '
+                'Only confirmed orders can start processing.'
+            )
+            return
+
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.PROCESSING,
+            )
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'⚙️ <b>Order Processing Started</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>',
+        )
+    elif data.startswith('admin_order_processing:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to process orders.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(pk=order_id).first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.CONFIRMED:
+            _send(
+                chat_id,
+                f'⚠️ This order is <b>{order.status}</b>. '
+                'Only confirmed orders can start processing.'
+            )
+            return
+
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.PROCESSING,
+            )
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'⚙️ <b>Order Processing Started</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>',
+            admin_processing_order_actions(order.id),
+        )
+    elif data.startswith('admin_order_ready:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to manage orders.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(pk=order_id).first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.PROCESSING:
+            _send(
+                chat_id,
+                f'⚠️ This order is <b>{order.status}</b>. '
+                'Only processing orders can be marked ready.'
+            )
+            return
+
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.READY_FOR_DELIVERY,
+            )
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'📦 <b>Order Ready for Delivery</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>',
+            admin_ready_order_actions(order.id),
+        )
+    elif data.startswith('admin_order_out:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to manage orders.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(pk=order_id).first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.READY_FOR_DELIVERY:
+            _send(
+                chat_id,
+                f'⚠️ This order is <b>{order.status}</b>. '
+                'Only ready orders can go out for delivery.'
+            )
+            return
+
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.OUT_FOR_DELIVERY,
+            )
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'🚚 <b>Order Out for Delivery</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>',
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '📋 View Order',
+                            'callback_data': f'admin_order:{order.id}',
+                        }
+                    ]
+                ]
+            },
         )
     elif data.startswith('seller_product_delete_confirm:'):
             product_id = int(data.split(':', 1)[1])

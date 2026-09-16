@@ -131,7 +131,7 @@ def _order_number():
     return f'BEM-{timezone.now():%Y%m%d}-{uuid4().hex[:8].upper()}'
 
 
-def checkout(user, shipping_address, idempotency_key, delivery_fee=Decimal('0'), notes=''):
+def checkout(user, shipping_address, idempotency_key, delivery_fee=Decimal('100'), notes=''):
     if not idempotency_key:
         raise ValidationError('An idempotency key is required.')
 
