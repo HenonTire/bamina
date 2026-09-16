@@ -153,8 +153,8 @@ def notify_order_parties(order):
 
     admin_lines.extend([
         '',
-        '<b>⚡ ACTION REQUIRED</b>',
-        'Please confirm and process this order.',
+        '<b>⏳ WAITING FOR SELLER</b>',
+        'The seller must accept or reject this order before admin processing.',
     ])
 
     admin_message = '\n'.join(admin_lines)

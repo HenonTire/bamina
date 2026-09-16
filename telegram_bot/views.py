@@ -1273,14 +1273,21 @@ def _handle_callback(account, chat_id, callback_id, data):
     elif data.startswith('admin_order:'):
         order_id = int(data.split(':', 1)[1])
         _show_admin_order(account, chat_id, order_id)
-    elif data.startswith('admin_order_confirm:'):
-        if not account.user.is_staff:
-            _send(chat_id, '❌ You are not authorized to confirm orders.')
+    elif data.startswith('admin_order:'):
+
+        order_id = int(data.split(':', 1)[1])
+
+        _show_admin_order(account, chat_id, order_id)
+    elif data.startswith('seller_order_accept:'):
+        seller = getattr(account.user, 'seller_profile', None)
+
+        if not seller:
+            _send(chat_id, '❌ You are not registered as a seller.')
             return
 
         order_id = int(data.split(':', 1)[1])
 
-        order = Order.objects.filter(pk=order_id).first()
+        order = seller_orders(account).filter(pk=order_id).first()
 
         if not order:
             _send(chat_id, '❌ That order was not found.')
@@ -1289,38 +1296,63 @@ def _handle_callback(account, chat_id, callback_id, data):
         if order.status != OrderStatus.PENDING:
             _send(
                 chat_id,
-                f'⚠️ This order is already <b>{order.status}</b>.',
+                f'⚠️ This order is already <b>{order.status}</b>.'
             )
             return
 
-        order.status = OrderStatus.CONFIRMED
-        order.save(update_fields=['status', 'updated_at'])
+        try:
+            order = transition_order(order, OrderStatus.CONFIRMED)
+            notify_admins_order_status(order, 'accepted')
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
 
         _send(
             chat_id,
-            (
-                f'✅ <b>Order Confirmed</b>\n\n'
-                f'Order: #{order.order_number}\n'
-                f'Status: <b>{order.status}</b>'
-            ),
-            {
-                'inline_keyboard': [
-                    [
-                        {
-                            'text': '📋 View Order',
-                            'callback_data': f'admin_order:{order.id}',
-                        }
-                    ],
-                    [
-                        {
-                            'text': '🏠 Main Menu',
-                            'callback_data': 'home',
-                        }
-                    ],
-                ]
-            },
+            f'✅ <b>Order Accepted</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>\n\n'
+            'The admin has been notified.'
         )
 
+    elif data.startswith('seller_order_reject:'):
+        seller = getattr(account.user, 'seller_profile', None)
+
+        if not seller:
+            _send(chat_id, '❌ You are not registered as a seller.')
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = seller_orders(account).filter(pk=order_id).first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.PENDING:
+            _send(
+                chat_id,
+                f'⚠️ This order is already <b>{order.status}</b>.'
+            )
+            return
+
+        try:
+            order = transition_order(order, OrderStatus.CANCELLED)
+            notify_admins_order_status(order, 'rejected')
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'❌ <b>Order Rejected</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>\n\n'
+            'Reserved stock has been released.\n'
+            'The admin has been notified.'
+        )
+    
 
 def process_update(update):
     telegram_user, chat_id, text = _user_from_update(update)

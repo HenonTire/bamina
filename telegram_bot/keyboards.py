@@ -65,12 +65,6 @@ def admin_order_actions(order_id):
         'inline_keyboard': [
             [
                 button(
-                    '✅ Confirm Order',
-                    f'admin_order_confirm:{order_id}',
-                ),
-            ],
-            [
-                button(
                     '📋 View Order',
                     f'admin_order:{order_id}',
                 ),
