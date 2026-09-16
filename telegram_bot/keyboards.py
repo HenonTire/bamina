@@ -59,3 +59,44 @@ def cart_actions():
         [button('✅ Checkout', 'checkout')],
         [button('🏠 Main Menu', 'home')],
     ]}
+
+def admin_order_actions(order_id):
+    return {
+        'inline_keyboard': [
+            [
+                button(
+                    '✅ Confirm Order',
+                    f'admin_order_confirm:{order_id}',
+                ),
+            ],
+            [
+                button(
+                    '📋 View Order',
+                    f'admin_order:{order_id}',
+                ),
+            ],
+        ]
+    }
+
+
+def seller_order_actions(order_id):
+    return {
+        'inline_keyboard': [
+            [
+                button(
+                    '✅ Accept Order',
+                    f'seller_order_accept:{order_id}',
+                ),
+                button(
+                    '❌ Reject Order',
+                    f'seller_order_reject:{order_id}',
+                ),
+            ],
+            [
+                button(
+                    '📋 View Order',
+                    f'seller_order:{order_id}',
+                ),
+            ],
+        ]
+    }

@@ -7,7 +7,7 @@ from cloudinary import uploader
 from django.conf import settings
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
-
+from .keyboards import admin_order_actions, seller_order_actions
 from api.models import Adress, CartItem, Notification, Order, ProductVariant, Products, Settlement
 from api.services import marketplace_shop
 from api.services import (
@@ -167,9 +167,10 @@ def notify_order_parties(order):
 
         try:
             client.send_message(
-                account.telegram_user_id,
-                admin_message,
-            )
+        account.telegram_user_id,
+        admin_message,
+        admin_order_actions(order.id),
+    )
         except Exception:
             logger.exception(
                 'Failed to notify admin %s about order %s',
@@ -246,9 +247,10 @@ def notify_order_parties(order):
 
         try:
             client.send_message(
-                account.telegram_user_id,
-                seller_message,
-            )
+            account.telegram_user_id,
+            seller_message,
+            seller_order_actions(order.id),
+        )
         except Exception:
             logger.exception(
                 'Failed to notify seller %s about order %s',

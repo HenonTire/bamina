@@ -10,7 +10,13 @@ from django.views.decorators.http import require_POST
 from rest_framework.exceptions import ValidationError
 from decimal import Decimal, InvalidOperation
 from decimal import InvalidOperation
-from api.models import Adress, ProductVariant, Products
+from api.models import (
+    Adress,
+    ProductVariant,
+    Products,
+    Order,
+    OrderStatus,
+)
 from api.services import add_to_cart, remove_cart_item, update_cart_item
 
 from . import keyboards
@@ -1168,6 +1174,56 @@ def _handle_callback(account, chat_id, callback_id, data):
             _show_cart(account, chat_id)
         except Exception as exc:
             _send(chat_id, safe_error(exc))
+    elif data.startswith('admin_order:'):
+        order_id = int(data.split(':', 1)[1])
+        _show_admin_order(account, chat_id, order_id)
+    elif data.startswith('admin_order_confirm:'):
+        if not account.user.is_staff:
+            _send(chat_id, '❌ You are not authorized to confirm orders.')
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(pk=order_id).first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.PENDING:
+            _send(
+                chat_id,
+                f'⚠️ This order is already <b>{order.status}</b>.',
+            )
+            return
+
+        order.status = OrderStatus.CONFIRMED
+        order.save(update_fields=['status', 'updated_at'])
+
+        _send(
+            chat_id,
+            (
+                f'✅ <b>Order Confirmed</b>\n\n'
+                f'Order: #{order.order_number}\n'
+                f'Status: <b>{order.status}</b>'
+            ),
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '📋 View Order',
+                            'callback_data': f'admin_order:{order.id}',
+                        }
+                    ],
+                    [
+                        {
+                            'text': '🏠 Main Menu',
+                            'callback_data': 'home',
+                        }
+                    ],
+                ]
+            },
+        )
 
 
 def process_update(update):
@@ -1203,3 +1259,70 @@ def webhook(request):
     except Exception:
         logger.exception('Telegram update processing failed')
     return JsonResponse({'ok': True})
+
+def _show_admin_order(account, chat_id, order_id):
+    if not account.user.is_staff:
+        _send(chat_id, '❌ You are not authorized to view this order.')
+        return
+
+    order = (
+        Order.objects
+        .prefetch_related('items')
+        .select_related('shipping_address')
+        .filter(pk=order_id)
+        .first()
+    )
+
+    if not order:
+        _send(chat_id, '❌ That order was not found.')
+        return
+
+    lines = [
+        '🛒 <b>ORDER DETAILS</b>',
+        '',
+        f'<b>Order:</b> #{order.order_number or order.pk}',
+        f'<b>Status:</b> {order.status}',
+        f'<b>Total:</b> {money(order.total)} ETB',
+        f'<b>Customer:</b> {html.escape(order.customer_phone or "Not provided")}',
+        '',
+        '<b>📦 Items:</b>',
+    ]
+
+    for item in order.items.all():
+        name = item.product_name or item.product.name
+
+        if item.variant_name:
+            name = f'{name} ({item.variant_name})'
+
+        lines.append(
+            f'• {html.escape(name)} × {item.quantity} '
+            f'— {money(item.line_total or item.price * item.quantity)}'
+        )
+
+    if order.shipping_address:
+        lines.extend([
+            '',
+            '<b>📍 Delivery:</b>',
+            html.escape(
+                getattr(order.shipping_address, 'address', None)
+                or 'Not provided'
+            ),
+        ])
+
+    lines.extend([
+        '',
+        f'<b>💵 Payment:</b> {order.get_payment_method_display()}',
+    ])
+
+    if order.notes:
+        lines.extend([
+            '',
+            '<b>📝 Notes:</b>',
+            html.escape(order.notes),
+        ])
+
+    _send(
+        chat_id,
+        '\n'.join(lines),
+        keyboards.admin_order_actions(order.id),
+    )
