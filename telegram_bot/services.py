@@ -67,45 +67,97 @@ def notify_admins(title, body):
             title=title,
             body=body,
         )
-
 def notify_order_parties(order):
     """
-    Notify both admins and the relevant sellers about a new order.
+    Notify admins and sellers about a newly created order.
 
-    - Admins are notified for every order.
-    - Each seller involved in the order receives one notification.
+    - Admins receive the complete order.
+    - Each seller receives only their own products.
+    - A seller receives only ONE notification even if they have
+      multiple products in the same order.
     """
 
-    items = order.items.select_related(
-        'product',
-        'seller',
+    items = list(
+        order.items.select_related(
+            'product',
+            'seller',
+        )
     )
 
-    # Group seller notifications so one seller gets only ONE message
-    # even if the order contains multiple products from them.
+    # Group order items by seller.
+    # seller_id=None means the product belongs to Beminet.
     sellers = {}
 
     for item in items:
         if item.seller_id is not None:
-            sellers[item.seller_id] = item.seller
+            sellers.setdefault(item.seller_id, []).append(item)
 
     client = TelegramClient()
 
-    # -------------------------
-    # Notify admins
-    # -------------------------
+    # =========================================================
+    # ADMIN NOTIFICATION
+    # =========================================================
+
     admins = User.objects.filter(
         is_staff=True,
         is_active=True,
     ).select_related('telegram_account')
 
-    admin_message = (
-        f'<b>🛒 New Order</b>\n\n'
-        f'<b>Order:</b> {order.order_number}\n'
-        f'<b>Total:</b> {order.total} ETB\n'
-        f'<b>Customer:</b> {order.customer_phone or "Not provided"}\n\n'
-        f'Please check the order.'
+    item_lines = []
+
+    for item in items:
+        name = item.product_name or item.product.name
+
+        if item.variant_name:
+            name = f'{name} ({item.variant_name})'
+
+        item_lines.append(
+            f'• {name} × {item.quantity} — {item.line_total or item.get_total_price()} ETB'
+        )
+
+    address = order.shipping_address
+
+    delivery_address = (
+        getattr(address, 'address', None)
+        or 'Not provided'
     )
+
+    payment_method = (
+        str(order.get_payment_method_display())
+        if hasattr(order, 'get_payment_method_display')
+        else str(order.payment_method)
+    )
+
+    admin_lines = [
+        '<b>🛒 NEW ORDER</b>',
+        '',
+        f'<b>Order:</b> #{order.order_number}',
+        f'<b>Total:</b> {order.total} ETB',
+        f'<b>Customer:</b> {order.customer_phone or "Not provided"}',
+        '',
+        '<b>📦 Items:</b>',
+        *item_lines,
+        '',
+        '<b>📍 Delivery:</b>',
+        delivery_address,
+        '',
+        f'<b>💵 Payment:</b> {payment_method}',
+    ]
+
+    if order.notes:
+        admin_lines.extend([
+            '',
+            '<b>📝 Customer Notes:</b>',
+            order.notes,
+        ])
+
+    admin_lines.extend([
+        '',
+        '<b>⚡ ACTION REQUIRED</b>',
+        'Please confirm and process this order.',
+    ])
+
+    admin_message = '\n'.join(admin_lines)
 
     for admin in admins:
         account = getattr(admin, 'telegram_account', None)
@@ -125,10 +177,14 @@ def notify_order_parties(order):
                 order.order_number,
             )
 
-    # -------------------------
-    # Notify sellers
-    # -------------------------
-    for seller in sellers.values():
+    # =========================================================
+    # SELLER NOTIFICATIONS
+    # =========================================================
+
+    for seller_id, seller_items in sellers.items():
+
+        seller = seller_items[0].seller
+
         account = getattr(
             seller.user,
             'telegram_account',
@@ -138,33 +194,60 @@ def notify_order_parties(order):
         if not account or not account.telegram_user_id:
             continue
 
-        seller_items = [
-            item
-            for item in order.items.all()
-            if item.seller_id == seller.id
-        ]
-
-        lines = [
-            '<b>🛒 New Order</b>',
-            '',
-            f'<b>Order:</b> {order.order_number}',
-            '',
-        ]
+        seller_item_lines = []
+        seller_total = Decimal('0')
 
         for item in seller_items:
-            lines.append(
-                f'• {item.product_name} × {item.quantity}'
+            name = item.product_name or item.product.name
+
+            if item.variant_name:
+                name = f'{name} ({item.variant_name})'
+
+            line_total = item.line_total or item.get_total_price()
+            seller_total += line_total
+
+            seller_item_lines.append(
+                f'• {name} × {item.quantity} — {line_total} ETB'
             )
 
-        lines.extend([
+        seller_lines = [
+            '<b>🛒 NEW ORDER</b>',
             '',
-            '<b>Please check your order.</b>',
+            f'<b>Order:</b> #{order.order_number}',
+            '',
+            '<b>📦 Your Products:</b>',
+            *seller_item_lines,
+            '',
+            f'<b>💰 Your Order Value:</b> {seller_total} ETB',
+            '',
+            '<b>👤 Customer:</b>',
+            order.customer_phone or 'Not provided',
+            '',
+            '<b>📍 Delivery:</b>',
+            delivery_address,
+            '',
+            f'<b>💵 Payment:</b> {payment_method}',
+        ]
+
+        if order.notes:
+            seller_lines.extend([
+                '',
+                '<b>📝 Customer Notes:</b>',
+                order.notes,
+            ])
+
+        seller_lines.extend([
+            '',
+            '<b>⚡ ACTION REQUIRED</b>',
+            'Please prepare your products for pickup.',
         ])
+
+        seller_message = '\n'.join(seller_lines)
 
         try:
             client.send_message(
                 account.telegram_user_id,
-                '\n'.join(lines),
+                seller_message,
             )
         except Exception:
             logger.exception(
