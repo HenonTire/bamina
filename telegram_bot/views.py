@@ -842,7 +842,7 @@ def _handle_callback(account, chat_id, callback_id, data):
                 account,
                 state.data,
                 status=(
-                    Products.Status.PENDING_REVIEW
+                    Products.Status.APPROVED
                     if data == 'seller_product_submit'
                     else Products.Status.DRAFT
                 ),
