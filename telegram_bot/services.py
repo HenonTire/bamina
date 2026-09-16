@@ -67,12 +67,13 @@ def notify_admins(title, body):
             title=title,
             body=body,
         )
+
 def notify_order_parties(order):
     """
-    Notify the appropriate Telegram user about an order.
+    Notify both admins and the relevant sellers about a new order.
 
-    - seller=None means the product belongs to Beminet, so notify staff/admin.
-    - seller!=None means the product belongs to that seller, so notify the seller.
+    - Admins are notified for every order.
+    - Each seller involved in the order receives one notification.
     """
 
     items = order.items.select_related(
@@ -80,65 +81,66 @@ def notify_order_parties(order):
         'seller',
     )
 
-    # Group seller notifications so a seller receives only ONE message
+    # Group seller notifications so one seller gets only ONE message
     # even if the order contains multiple products from them.
     sellers = {}
-    has_beminet_product = False
 
     for item in items:
-        if item.seller_id is None:
-            has_beminet_product = True
-        else:
+        if item.seller_id is not None:
             sellers[item.seller_id] = item.seller
 
     client = TelegramClient()
 
     # -------------------------
-    # Beminet-owned products
+    # Notify admins
     # -------------------------
-    if has_beminet_product:
-        admins = User.objects.filter(
-            is_staff=True,
-            is_active=True,
-        ).select_related('telegram_account')
+    admins = User.objects.filter(
+        is_staff=True,
+        is_active=True,
+    ).select_related('telegram_account')
 
-        message = (
-            f'<b>🛒 New Beminet Order</b>\n\n'
-            f'<b>Order:</b> {order.order_number}\n'
-            f'<b>Total:</b> {order.total} ETB\n'
-            f'<b>Customer:</b> {order.customer_phone or "Not provided"}\n\n'
-            f'An order contains a Beminet-owned product.'
-        )
+    admin_message = (
+        f'<b>🛒 New Order</b>\n\n'
+        f'<b>Order:</b> {order.order_number}\n'
+        f'<b>Total:</b> {order.total} ETB\n'
+        f'<b>Customer:</b> {order.customer_phone or "Not provided"}\n\n'
+        f'Please check the order.'
+    )
 
-        for admin in admins:
-            account = getattr(admin, 'telegram_account', None)
+    for admin in admins:
+        account = getattr(admin, 'telegram_account', None)
 
-            if not account or not account.telegram_user_id:
-                continue
+        if not account or not account.telegram_user_id:
+            continue
 
-            try:
-                client.send_message(
-                    account.telegram_user_id,
-                    message,
-                )
-            except Exception:
-                logger.exception(
-                    'Failed to notify admin %s about order %s',
-                    admin.id,
-                    order.order_number,
-                )
+        try:
+            client.send_message(
+                account.telegram_user_id,
+                admin_message,
+            )
+        except Exception:
+            logger.exception(
+                'Failed to notify admin %s about order %s',
+                admin.id,
+                order.order_number,
+            )
 
     # -------------------------
-    # Seller-owned products
+    # Notify sellers
     # -------------------------
     for seller in sellers.values():
-        account = getattr(seller.user, 'telegram_account', None)
+        account = getattr(
+            seller.user,
+            'telegram_account',
+            None,
+        )
 
         if not account or not account.telegram_user_id:
             continue
 
         seller_items = [
-            item for item in order.items.all()
+            item
+            for item in order.items.all()
             if item.seller_id == seller.id
         ]
 
