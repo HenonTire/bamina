@@ -991,6 +991,27 @@ def _handle_callback(account, chat_id, callback_id, data):
             f'Current name: <b>{html.escape(product.name)}</b>\n\n'
             'Enter the new product name:',
         )
+    elif data.startswith('seller_edit_description:'):
+        product_id = int(data.split(':', 1)[1])
+        product = seller_products(account).filter(pk=product_id).first()
+
+        if not product:
+            _send(chat_id, '❌ Product not found.')
+            return
+
+        set_state(
+            account,
+            'seller_edit_description',
+            product_id=product.id,
+        )
+
+        _send(
+            chat_id,
+            f'✏️ <b>Edit Product Description</b>\n\n'
+            f'Current description:\n'
+            f'{html.escape(product.description or "No description")}\n\n'
+            'Enter the new product description:',
+        )
 
     elif data.startswith('seller_edit_price:'):
         product_id = int(data.split(':', 1)[1])
