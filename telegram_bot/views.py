@@ -19,8 +19,12 @@ from api.models import (
     Inventory,
 )
 from django.db import transaction
-from api.services import add_to_cart, remove_cart_item, update_cart_item
-
+from api.services import (
+    add_to_cart,
+    remove_cart_item,
+    update_cart_item,
+    transition_order,
+)
 from . import keyboards
 from .formatters import cart_text, money, order_text, product_text, tracking_text
 from .services import (
@@ -846,26 +850,15 @@ def _handle_callback(account, chat_id, callback_id, data):
         seller = getattr(account.user, 'seller_profile', None)
 
         if not seller:
-            _send(
-                chat_id,
-                '❌ You are not registered as a seller.'
-            )
+            _send(chat_id, '❌ You are not registered as a seller.')
             return
 
         order_id = int(data.split(':', 1)[1])
 
-        order = (
-            seller_orders(account)
-            .select_for_update()
-            .filter(pk=order_id)
-            .first()
-        )
+        order = seller_orders(account).filter(pk=order_id).first()
 
         if not order:
-            _send(
-                chat_id,
-                '❌ That order was not found.'
-            )
+            _send(chat_id, '❌ That order was not found.')
             return
 
         if order.status != OrderStatus.PENDING:
@@ -875,156 +868,72 @@ def _handle_callback(account, chat_id, callback_id, data):
             )
             return
 
-        with transaction.atomic():
-            order = (
-                Order.objects
-                .select_for_update()
-                .filter(pk=order_id)
-                .first()
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.CONFIRMED,
             )
 
-            if not order:
-                _send(chat_id, '❌ That order was not found.')
-                return
+            notify_admins_order_status(
+                order,
+                'accepted',
+            )
 
-            if order.status != OrderStatus.PENDING:
-                _send(
-                    chat_id,
-                    f'⚠️ This order is already <b>{order.status}</b>.'
-                )
-                return
-
-            order.status = OrderStatus.CONFIRMED
-            order.save(update_fields=['status', 'updated_at'])
-
-        notify_admins_order_status(order, 'accepted')
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
 
         _send(
             chat_id,
-            (
-                f'✅ <b>Order Accepted</b>\n\n'
-                f'<b>Order:</b> #{order.order_number}\n'
-                f'<b>Status:</b> {order.status}\n\n'
-                'Please prepare the products for pickup.'
-            ),
-            {
-                'inline_keyboard': [
-                    [
-                        {
-                            'text': '📋 View Order',
-                            'callback_data': f'seller_order:{order.id}',
-                        }
-                    ],
-                    [
-                        {
-                            'text': '↩️ Seller Dashboard',
-                            'callback_data': 'seller',
-                        }
-                    ],
-                ]
-            },
+            f'✅ <b>Order Accepted</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>\n\n'
+            'The admin has been notified.'
         )
     elif data.startswith('seller_order_reject:'):
         seller = getattr(account.user, 'seller_profile', None)
 
         if not seller:
-            _send(
-                chat_id,
-                '❌ You are not registered as a seller.'
-            )
+            _send(chat_id, '❌ You are not registered as a seller.')
             return
 
         order_id = int(data.split(':', 1)[1])
 
-        with transaction.atomic():
-            order = (
-                seller_orders(account)
-                .select_for_update()
-                .filter(pk=order_id)
-                .first()
+        order = seller_orders(account).filter(pk=order_id).first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.PENDING:
+            _send(
+                chat_id,
+                f'⚠️ This order is already <b>{order.status}</b>.'
+            )
+            return
+
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.CANCELLED,
             )
 
-            if not order:
-                _send(
-                    chat_id,
-                    '❌ That order was not found.'
-                )
-                return
-
-            if order.status != OrderStatus.PENDING:
-                _send(
-                    chat_id,
-                    f'⚠️ This order is already <b>{order.status}</b>.'
-                )
-                return
-
-            # Lock all order items while releasing their reservations.
-            items = list(
-                order.items
-                .select_related('variant')
-                .all()
+            notify_admins_order_status(
+                order,
+                'rejected',
             )
 
-            for item in items:
-                if not item.variant_id:
-                    continue
-
-                inventory = (
-                    Inventory.objects
-                    .select_for_update()
-                    .filter(variant_id=item.variant_id)
-                    .first()
-                )
-
-                if not inventory:
-                    continue
-
-                inventory.quantity_reserved = max(
-                    0,
-                    inventory.quantity_reserved - item.quantity,
-                )
-
-                inventory.save(
-                    update_fields=[
-                        'quantity_reserved',
-                        'updated_at',
-                    ]
-                )
-
-            order.status = OrderStatus.CANCELLED
-            order.save(
-                update_fields=[
-                    'status',
-                    'updated_at',
-                ]
-            )
-
-        notify_admins_order_status(order, 'rejected')
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
 
         _send(
             chat_id,
-            (
-                f'❌ <b>Order Rejected</b>\n\n'
-                f'<b>Order:</b> #{order.order_number}\n'
-                f'<b>Status:</b> {order.status}\n\n'
-                'The reserved stock has been released.'
-            ),
-            {
-                'inline_keyboard': [
-                    [
-                        {
-                            'text': '📋 View Order',
-                            'callback_data': f'seller_order:{order.id}',
-                        }
-                    ],
-                    [
-                        {
-                            'text': '↩️ Seller Dashboard',
-                            'callback_data': 'seller',
-                        }
-                    ],
-                ]
-            },
+            f'❌ <b>Order Rejected</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>\n\n'
+            'Reserved stock has been released.\n'
+            'The admin has been notified.'
         )
     elif data == 'seller_settlements':
         _show_settlements(account, chat_id)
@@ -1452,13 +1361,7 @@ def _show_admin_order(account, chat_id, order_id):
         _send(chat_id, '❌ You are not authorized to view this order.')
         return
 
-    order = (
-        Order.objects
-        .prefetch_related('items')
-        .select_related('shipping_address')
-        .filter(pk=order_id)
-        .first()
-    )
+    order = seller_orders(account).filter(pk=order_id).first()
 
     if not order:
         _send(chat_id, '❌ That order was not found.')
