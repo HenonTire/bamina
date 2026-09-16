@@ -16,7 +16,9 @@ from api.models import (
     Products,
     Order,
     OrderStatus,
+    Inventory,
 )
+from django.db import transaction
 from api.services import add_to_cart, remove_cart_item, update_cart_item
 
 from . import keyboards
@@ -40,6 +42,7 @@ from .services import (
     store_telegram_photo,
     telegram_sender,
     checkout_for_account,
+    notify_admins_order_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -839,6 +842,190 @@ def _handle_callback(account, chat_id, callback_id, data):
         _show_seller_orders(account, chat_id)
     elif data.startswith('seller_order:'):
         _show_seller_order(account, chat_id, int(data.split(':')[1]))
+    elif data.startswith('seller_order_accept:'):
+        seller = getattr(account.user, 'seller_profile', None)
+
+        if not seller:
+            _send(
+                chat_id,
+                '❌ You are not registered as a seller.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = (
+            seller_orders(account)
+            .select_for_update()
+            .filter(pk=order_id)
+            .first()
+        )
+
+        if not order:
+            _send(
+                chat_id,
+                '❌ That order was not found.'
+            )
+            return
+
+        if order.status != OrderStatus.PENDING:
+            _send(
+                chat_id,
+                f'⚠️ This order is already <b>{order.status}</b>.'
+            )
+            return
+
+        with transaction.atomic():
+            order = (
+                Order.objects
+                .select_for_update()
+                .filter(pk=order_id)
+                .first()
+            )
+
+            if not order:
+                _send(chat_id, '❌ That order was not found.')
+                return
+
+            if order.status != OrderStatus.PENDING:
+                _send(
+                    chat_id,
+                    f'⚠️ This order is already <b>{order.status}</b>.'
+                )
+                return
+
+            order.status = OrderStatus.CONFIRMED
+            order.save(update_fields=['status', 'updated_at'])
+
+        notify_admins_order_status(order, 'accepted')
+
+        _send(
+            chat_id,
+            (
+                f'✅ <b>Order Accepted</b>\n\n'
+                f'<b>Order:</b> #{order.order_number}\n'
+                f'<b>Status:</b> {order.status}\n\n'
+                'Please prepare the products for pickup.'
+            ),
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '📋 View Order',
+                            'callback_data': f'seller_order:{order.id}',
+                        }
+                    ],
+                    [
+                        {
+                            'text': '↩️ Seller Dashboard',
+                            'callback_data': 'seller',
+                        }
+                    ],
+                ]
+            },
+        )
+    elif data.startswith('seller_order_reject:'):
+        seller = getattr(account.user, 'seller_profile', None)
+
+        if not seller:
+            _send(
+                chat_id,
+                '❌ You are not registered as a seller.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        with transaction.atomic():
+            order = (
+                seller_orders(account)
+                .select_for_update()
+                .filter(pk=order_id)
+                .first()
+            )
+
+            if not order:
+                _send(
+                    chat_id,
+                    '❌ That order was not found.'
+                )
+                return
+
+            if order.status != OrderStatus.PENDING:
+                _send(
+                    chat_id,
+                    f'⚠️ This order is already <b>{order.status}</b>.'
+                )
+                return
+
+            # Lock all order items while releasing their reservations.
+            items = list(
+                order.items
+                .select_related('variant')
+                .all()
+            )
+
+            for item in items:
+                if not item.variant_id:
+                    continue
+
+                inventory = (
+                    Inventory.objects
+                    .select_for_update()
+                    .filter(variant_id=item.variant_id)
+                    .first()
+                )
+
+                if not inventory:
+                    continue
+
+                inventory.quantity_reserved = max(
+                    0,
+                    inventory.quantity_reserved - item.quantity,
+                )
+
+                inventory.save(
+                    update_fields=[
+                        'quantity_reserved',
+                        'updated_at',
+                    ]
+                )
+
+            order.status = OrderStatus.CANCELLED
+            order.save(
+                update_fields=[
+                    'status',
+                    'updated_at',
+                ]
+            )
+
+        notify_admins_order_status(order, 'rejected')
+
+        _send(
+            chat_id,
+            (
+                f'❌ <b>Order Rejected</b>\n\n'
+                f'<b>Order:</b> #{order.order_number}\n'
+                f'<b>Status:</b> {order.status}\n\n'
+                'The reserved stock has been released.'
+            ),
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '📋 View Order',
+                            'callback_data': f'seller_order:{order.id}',
+                        }
+                    ],
+                    [
+                        {
+                            'text': '↩️ Seller Dashboard',
+                            'callback_data': 'seller',
+                        }
+                    ],
+                ]
+            },
+        )
     elif data == 'seller_settlements':
         _show_settlements(account, chat_id)
     elif data in ('seller_product_submit', 'seller_product_draft'):

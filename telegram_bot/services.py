@@ -257,6 +257,60 @@ def notify_order_parties(order):
                 seller.id,
                 order.order_number,
             )
+def notify_admins_order_status(order, action):
+    """
+    Notify all active staff Telegram accounts when a seller
+    accepts or rejects an order.
+    """
+
+    admins = User.objects.filter(
+        is_staff=True,
+        is_active=True,
+    ).select_related('telegram_account')
+
+    if action == 'accepted':
+        title = '🟢 SELLER ACCEPTED ORDER'
+        message = (
+            'The seller has accepted this order.\n\n'
+            f'<b>Order:</b> #{order.order_number}\n'
+            f'<b>Total:</b> {order.total} ETB\n'
+            f'<b>Status:</b> {order.status}'
+        )
+
+    elif action == 'rejected':
+        title = '🔴 SELLER REJECTED ORDER'
+        message = (
+            'The seller has rejected this order.\n\n'
+            f'<b>Order:</b> #{order.order_number}\n'
+            f'<b>Total:</b> {order.total} ETB\n'
+            f'<b>Status:</b> {order.status}\n\n'
+            'Reserved stock has been released.'
+        )
+
+    else:
+        return
+
+    text = f'<b>{title}</b>\n\n{message}'
+
+    client = TelegramClient()
+
+    for admin in admins:
+        account = getattr(admin, 'telegram_account', None)
+
+        if not account or not account.telegram_user_id:
+            continue
+
+        try:
+            client.send_message(
+                account.telegram_user_id,
+                text,
+            )
+        except Exception:
+            logger.exception(
+                'Failed to notify admin %s about order %s status change',
+                admin.id,
+                order.order_number,
+            )
 class TelegramAPIError(Exception):
     pass
 
