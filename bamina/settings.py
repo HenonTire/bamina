@@ -243,8 +243,8 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=72),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=60),
     "AUTH_HEADER_TYPES": ("Bearer",),
-    "BLACKLIST_AFTER_ROTATION": True,
-    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": False,
+    "ROTATE_REFRESH_TOKENS": False,
 }
 
 
