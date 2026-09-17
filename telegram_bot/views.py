@@ -27,7 +27,12 @@ from api.services import (
     transition_delivery,
 )
 from . import keyboards
-from .keyboards import admin_processing_order_actions, admin_ready_order_actions, admin
+from .keyboards import (
+    admin_processing_order_actions,
+    admin_ready_order_actions,
+    admin_confirmed_order_actions,
+    admin_ready_order_actions,
+)
 from .formatters import cart_text, money, order_text, product_text, tracking_text
 from .services import (
     TelegramAPIError,
