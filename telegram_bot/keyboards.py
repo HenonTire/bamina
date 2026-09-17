@@ -148,3 +148,24 @@ def seller_order_actions(order_id):
             ],
         ]
     }
+def admin_out_for_delivery_actions(order_id):
+    return {
+        'inline_keyboard': [
+            [
+                button(
+                    '✅ Mark Delivered',
+                    f'admin_delivery_delivered:{order_id}',
+                ),
+                button(
+                    '❌ Delivery Failed',
+                    f'admin_delivery_failed:{order_id}',
+                ),
+            ],
+            [
+                button(
+                    '📋 View Order',
+                    f'admin_order:{order_id}',
+                ),
+            ],
+        ]
+    }

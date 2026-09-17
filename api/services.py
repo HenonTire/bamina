@@ -236,46 +236,94 @@ def transition_order(order, new_status):
                         inventory.save(update_fields=['quantity_reserved', 'updated_at'])
         return locked
 
-
 def transition_delivery(delivery, new_status, failure_reason=''):
     allowed = {
-        Delivery.Status.PENDING: {Delivery.Status.ASSIGNED},
-        Delivery.Status.ASSIGNED: {Delivery.Status.PICKED_UP},
-        Delivery.Status.PICKED_UP: {Delivery.Status.OUT_FOR_DELIVERY},
-        Delivery.Status.OUT_FOR_DELIVERY: {Delivery.Status.DELIVERED, Delivery.Status.FAILED},
-        Delivery.Status.FAILED: {Delivery.Status.RETURNED},
+        Delivery.Status.PENDING: {
+            Delivery.Status.ASSIGNED,
+            Delivery.Status.OUT_FOR_DELIVERY,
+        },
+        Delivery.Status.ASSIGNED: {
+            Delivery.Status.PICKED_UP,
+            Delivery.Status.OUT_FOR_DELIVERY,
+        },
+        Delivery.Status.PICKED_UP: {
+            Delivery.Status.OUT_FOR_DELIVERY,
+        },
+        Delivery.Status.OUT_FOR_DELIVERY: {
+            Delivery.Status.DELIVERED,
+            Delivery.Status.FAILED,
+        },
+        Delivery.Status.FAILED: {
+            Delivery.Status.RETURNED,
+        },
     }
+
     with transaction.atomic():
         locked = Delivery.objects.select_for_update().get(pk=delivery.pk)
+
         if new_status not in allowed.get(locked.status, set()):
-            raise ValidationError(f'Cannot transition delivery from {locked.status} to {new_status}.')
+            raise ValidationError(
+                f'Cannot transition delivery from '
+                f'{locked.status} to {new_status}.'
+            )
+
         locked.status = new_status
         now = timezone.now()
+
         if new_status == Delivery.Status.PICKED_UP:
             locked.picked_up_at = now
+
+        elif new_status == Delivery.Status.OUT_FOR_DELIVERY:
+            # Admin is the courier in MVP, so going directly
+            # from pending/assigned to out_for_delivery is valid.
+            if not locked.picked_up_at:
+                locked.picked_up_at = now
+
         elif new_status == Delivery.Status.DELIVERED:
             locked.delivered_at = now
+
         elif new_status == Delivery.Status.FAILED:
             locked.failed_at = now
             locked.failure_reason = failure_reason
+
         locked.save()
+
         if new_status == Delivery.Status.DELIVERED:
-            order = Order.objects.select_for_update().get(pk=locked.order_id)
+            order = Order.objects.select_for_update().get(
+                pk=locked.order_id
+            )
+
             if order.status != OrderStatus.OUT_FOR_DELIVERY:
-                raise ValidationError('Order must be out for delivery first.')
+                raise ValidationError(
+                    'Order must be out for delivery first.'
+                )
+
             for item in order.items.select_related('variant'):
                 if item.variant_id:
-                    Inventory.objects.select_for_update().get(variant=item.variant).confirm(item.quantity)
+                    inventory = Inventory.objects.select_for_update().get(
+                        variant=item.variant
+                    )
+                    inventory.confirm(item.quantity)
+
             order.status = OrderStatus.DELIVERED
             order.save(update_fields=['status', 'updated_at'])
-            payment = Payment.objects.select_for_update().get(order=order)
+
+            payment = Payment.objects.select_for_update().get(
+                order=order
+            )
             payment.status = Payment.Status.COLLECTED
             payment.collected_at = now
-            payment.save(update_fields=['status', 'collected_at', 'updated_at'])
+            payment.save(
+                update_fields=[
+                    'status',
+                    'collected_at',
+                    'updated_at',
+                ]
+            )
+
             create_settlements(order)
+
         return locked
-
-
 def create_settlements(order):
     for item in order.items.select_related('seller'):
         if item.seller_id:

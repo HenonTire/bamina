@@ -552,12 +552,19 @@ def create_product_from_state(account, data, status=Products.Status.APPROVED):
     notify_admins('New seller product', f'{product.name} was submitted by {seller.display_name}.')
     return product
 
-
 def checkout_for_account(account, address_id, idempotency_key, notes=''):
-    address = Adress.objects.get(pk=address_id, user=account.user)
-    return checkout(account.user, address, idempotency_key, notes=notes)
+    address = Adress.objects.get(
+        pk=address_id,
+        user=account.user,
+    )
 
-
+    return checkout(
+        account.user,
+        address,
+        idempotency_key,
+        delivery_fee=Decimal('100'),
+        notes=notes,
+    )
 def safe_error(exc):
     logger.exception('Telegram bot operation failed', exc_info=exc)
     if isinstance(exc, ValidationError):

@@ -16,7 +16,7 @@ from api.models import (
     Products,
     Order,
     OrderStatus,
-    Inventory,
+    Delivery,
 )
 from django.db import transaction
 from api.services import (
@@ -24,9 +24,10 @@ from api.services import (
     remove_cart_item,
     update_cart_item,
     transition_order,
+    transition_delivery,
 )
 from . import keyboards
-from .keyboards import admin_processing_order_actions, admin_ready_order_actions
+from .keyboards import admin_processing_order_actions, admin_ready_order_actions, admin
 from .formatters import cart_text, money, order_text, product_text, tracking_text
 from .services import (
     TelegramAPIError,
@@ -310,10 +311,46 @@ def _address_prompt(account, chat_id):
 def _checkout_summary(account, chat_id, address_id):
     cart = account.user.cart
     items = cart.items.select_related('product', 'variant').all()
-    subtotal = sum((item.unit_price or item.variant.price) * item.quantity for item in items)
-    set_state(account, 'checkout_confirm', address_id=address_id, idempotency_key=f'tg-{account.telegram_user_id}-{secrets.token_hex(8)}')
-    _send(chat_id, f'🧾 <b>Order Summary</b>\n\nSubtotal: {money(subtotal)}\nDelivery: {money(0)}\nTotal: {money(subtotal)}\n\n💵 Cash on Delivery', {'inline_keyboard': [[{'text': '✅ Confirm Order', 'callback_data': 'confirm_checkout'}], [{'text': '❌ Cancel', 'callback_data': 'home'}]]})
 
+    subtotal = sum(
+        (item.unit_price or item.variant.price) * item.quantity
+        for item in items
+    )
+
+    delivery_fee = Decimal('100')
+    total = subtotal + delivery_fee
+
+    set_state(
+        account,
+        'checkout_confirm',
+        address_id=address_id,
+        idempotency_key=f'tg-{account.telegram_user_id}-{secrets.token_hex(8)}',
+    )
+
+    _send(
+        chat_id,
+        f'🧾 <b>Order Summary</b>\n\n'
+        f'Subtotal: {money(subtotal)} ETB\n'
+        f'Delivery: {money(delivery_fee)} ETB\n'
+        f'Total: {money(total)} ETB\n\n'
+        f'💵 Cash on Delivery',
+        {
+            'inline_keyboard': [
+                [
+                    {
+                        'text': '✅ Confirm Order',
+                        'callback_data': 'confirm_checkout',
+                    }
+                ],
+                [
+                    {
+                        'text': '❌ Cancel',
+                        'callback_data': 'home',
+                    }
+                ],
+            ]
+        },
+    )
 
 def _handle_text(account, chat_id, text):
     state = conversation(account)
@@ -1042,45 +1079,7 @@ def _handle_callback(account, chat_id, callback_id, data):
                     ]
                 },
         )
-    elif data.startswith('admin_order_processing:'):
-        if not account.user.is_staff:
-            _send(
-                chat_id,
-                '❌ You are not authorized to process orders.'
-            )
-            return
-
-        order_id = int(data.split(':', 1)[1])
-
-        order = Order.objects.filter(pk=order_id).first()
-
-        if not order:
-            _send(chat_id, '❌ That order was not found.')
-            return
-
-        if order.status != OrderStatus.CONFIRMED:
-            _send(
-                chat_id,
-                f'⚠️ This order is <b>{order.status}</b>. '
-                'Only confirmed orders can start processing.'
-            )
-            return
-
-        try:
-            order = transition_order(
-                order,
-                OrderStatus.PROCESSING,
-            )
-        except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
-            return
-
-        _send(
-            chat_id,
-            f'⚙️ <b>Order Processing Started</b>\n\n'
-            f'Order: #{order.order_number}\n'
-            f'Status: <b>{order.status}</b>',
-        )
+    
     elif data.startswith('admin_order_processing:'):
         if not account.user.is_staff:
             _send(
@@ -1171,7 +1170,12 @@ def _handle_callback(account, chat_id, callback_id, data):
 
         order_id = int(data.split(':', 1)[1])
 
-        order = Order.objects.filter(pk=order_id).first()
+        order = (
+            Order.objects
+            .select_related('delivery')
+            .filter(pk=order_id)
+            .first()
+        )
 
         if not order:
             _send(chat_id, '❌ That order was not found.')
@@ -1185,11 +1189,27 @@ def _handle_callback(account, chat_id, callback_id, data):
             )
             return
 
-        try:
-            order = transition_order(
-                order,
-                OrderStatus.OUT_FOR_DELIVERY,
+        delivery = getattr(order, 'delivery', None)
+
+        if not delivery:
+            _send(
+                chat_id,
+                '❌ This order does not have a delivery record.'
             )
+            return
+
+        try:
+            with transaction.atomic():
+                order = transition_order(
+                    order,
+                    OrderStatus.OUT_FOR_DELIVERY,
+                )
+
+                transition_delivery(
+                    delivery,
+                    Delivery.Status.OUT_FOR_DELIVERY,
+                )
+
         except ValidationError as exc:
             _send(chat_id, safe_error(exc))
             return
@@ -1198,7 +1218,63 @@ def _handle_callback(account, chat_id, callback_id, data):
             chat_id,
             f'🚚 <b>Order Out for Delivery</b>\n\n'
             f'Order: #{order.order_number}\n'
-            f'Status: <b>{order.status}</b>',
+            f'Order Status: <b>{order.status}</b>\n'
+            f'Delivery Status: <b>{delivery.status}</b>\n\n'
+            f'Admin can now manage the delivery.',
+            keyboards.admin_out_for_delivery_actions(order.id),
+        )
+    elif data.startswith('admin_delivery_delivered:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to manage deliveries.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(
+            pk=order_id
+        ).select_related('delivery').first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.OUT_FOR_DELIVERY:
+            _send(
+                chat_id,
+                f'⚠️ This order is <b>{order.status}</b>. '
+                'Only orders out for delivery can be delivered.'
+            )
+            return
+
+        delivery = getattr(order, 'delivery', None)
+
+        if not delivery:
+            _send(
+                chat_id,
+                '❌ No delivery record exists for this order.'
+            )
+            return
+
+        try:
+            transition_delivery(
+                delivery,
+                Delivery.Status.DELIVERED,
+            )
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'✅ <b>Order Delivered</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{OrderStatus.DELIVERED}</b>\n\n'
+            f'💵 COD payment collected.\n'
+            f'📦 Inventory confirmed.\n'
+            f'💰 Seller settlement created.',
             {
                 'inline_keyboard': [
                     [
@@ -1210,6 +1286,135 @@ def _handle_callback(account, chat_id, callback_id, data):
                 ]
             },
         )
+    elif data.startswith('admin_delivery_failed:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to manage deliveries.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(
+            pk=order_id
+        ).select_related('delivery').first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        if order.status != OrderStatus.OUT_FOR_DELIVERY:
+            _send(
+                chat_id,
+                f'⚠️ This order is <b>{order.status}</b>. '
+                'Only orders out for delivery can fail.'
+            )
+            return
+
+        delivery = getattr(order, 'delivery', None)
+
+        if not delivery:
+            _send(
+                chat_id,
+                '❌ No delivery record exists for this order.'
+            )
+            return
+
+        try:
+            transition_delivery(
+                delivery,
+                Delivery.Status.FAILED,
+                failure_reason='Delivery failed.',
+            )
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'❌ <b>Delivery Failed</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Delivery status: <b>{delivery.status}</b>\n\n'
+            f'The delivery can now be returned.',
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '↩️ Return Order',
+                            'callback_data': f'admin_delivery_return:{order.id}',
+                        }
+                    ],
+                    [
+                        {
+                            'text': '📋 View Order',
+                            'callback_data': f'admin_order:{order.id}',
+                        }
+                    ],
+                ]
+            },
+        )
+    elif data.startswith('admin_delivery_return:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to manage deliveries.'
+            )
+            return
+
+        order_id = int(data.split(':', 1)[1])
+
+        order = Order.objects.filter(
+            pk=order_id
+        ).select_related('delivery').first()
+
+        if not order:
+            _send(chat_id, '❌ That order was not found.')
+            return
+
+        delivery = getattr(order, 'delivery', None)
+
+        if not delivery:
+            _send(
+                chat_id,
+                '❌ No delivery record exists for this order.'
+            )
+            return
+
+        if delivery.status != Delivery.Status.FAILED:
+            _send(
+                chat_id,
+                f'⚠️ Delivery is currently <b>{delivery.status}</b>. '
+                'Only failed deliveries can be returned.'
+            )
+            return
+
+        try:
+            transition_delivery(
+                delivery,
+                Delivery.Status.RETURNED,
+            )
+        except ValidationError as exc:
+            _send(chat_id, safe_error(exc))
+            return
+
+        _send(
+            chat_id,
+            f'↩️ <b>Order Returned</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Delivery status: <b>{delivery.status}</b>',
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '📋 View Order',
+                            'callback_data': f'admin_order:{order.id}',
+                        }
+                    ]
+                ]
+            },
+        )
+    
     elif data.startswith('seller_product_delete_confirm:'):
             product_id = int(data.split(':', 1)[1])
     
@@ -1440,90 +1645,13 @@ def _handle_callback(account, chat_id, callback_id, data):
             _show_cart(account, chat_id)
         except Exception as exc:
             _send(chat_id, safe_error(exc))
-    elif data.startswith('admin_order:'):
-        order_id = int(data.split(':', 1)[1])
-        _show_admin_order(account, chat_id, order_id)
-    elif data.startswith('admin_order:'):
-
-        order_id = int(data.split(':', 1)[1])
-
-        _show_admin_order(account, chat_id, order_id)
-    elif data.startswith('seller_order_accept:'):
-        seller = getattr(account.user, 'seller_profile', None)
-
-        if not seller:
-            _send(chat_id, '❌ You are not registered as a seller.')
-            return
-
-        order_id = int(data.split(':', 1)[1])
-
-        order = seller_orders(account).filter(pk=order_id).first()
-
-        if not order:
-            _send(chat_id, '❌ That order was not found.')
-            return
-
-        if order.status != OrderStatus.PENDING:
-            _send(
-                chat_id,
-                f'⚠️ This order is already <b>{order.status}</b>.'
-            )
-            return
-
-        try:
-            order = transition_order(order, OrderStatus.CONFIRMED)
-            notify_admins_order_status(order, 'accepted')
-        except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
-            return
-
-        _send(
-            chat_id,
-            f'✅ <b>Order Accepted</b>\n\n'
-            f'Order: #{order.order_number}\n'
-            f'Status: <b>{order.status}</b>\n\n'
-            'The admin has been notified.'
-        )
-
-    elif data.startswith('seller_order_reject:'):
-        seller = getattr(account.user, 'seller_profile', None)
-
-        if not seller:
-            _send(chat_id, '❌ You are not registered as a seller.')
-            return
-
-        order_id = int(data.split(':', 1)[1])
-
-        order = seller_orders(account).filter(pk=order_id).first()
-
-        if not order:
-            _send(chat_id, '❌ That order was not found.')
-            return
-
-        if order.status != OrderStatus.PENDING:
-            _send(
-                chat_id,
-                f'⚠️ This order is already <b>{order.status}</b>.'
-            )
-            return
-
-        try:
-            order = transition_order(order, OrderStatus.CANCELLED)
-            notify_admins_order_status(order, 'rejected')
-        except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
-            return
-
-        _send(
-            chat_id,
-            f'❌ <b>Order Rejected</b>\n\n'
-            f'Order: #{order.order_number}\n'
-            f'Status: <b>{order.status}</b>\n\n'
-            'Reserved stock has been released.\n'
-            'The admin has been notified.'
-        )
     
+    elif data.startswith('admin_order:'):
 
+        order_id = int(data.split(':', 1)[1])
+
+        _show_admin_order(account, chat_id, order_id)
+   
 def process_update(update):
     telegram_user, chat_id, text = _user_from_update(update)
     if not telegram_user or chat_id is None:
