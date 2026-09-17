@@ -1,17 +1,21 @@
 from email.mime import text
+
 import html
 import logging
 import secrets
 from hmac import compare_digest
-from turtle import update
+
 from api.services import generate_unique_product_slug
+
 from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+
 from rest_framework.exceptions import ValidationError
+
 from decimal import Decimal, InvalidOperation
-from decimal import InvalidOperation
+
 from api.models import (
     Adress,
     ProductVariant,
@@ -20,7 +24,9 @@ from api.models import (
     OrderStatus,
     Delivery,
 )
+
 from django.db import transaction
+
 from api.services import (
     add_to_cart,
     remove_cart_item,
@@ -28,14 +34,23 @@ from api.services import (
     transition_order,
     transition_delivery,
 )
+
 from . import keyboards
+
 from .keyboards import (
     admin_processing_order_actions,
     admin_ready_order_actions,
     admin_confirmed_order_actions,
-    admin_ready_order_actions,
 )
-from .formatters import cart_text, money, order_text, product_text, tracking_text
+
+from .formatters import (
+    cart_text,
+    money,
+    order_text,
+    product_text,
+    tracking_text,
+)
+
 from .services import (
     TelegramAPIError,
     clear_state,
@@ -56,7 +71,6 @@ from .services import (
     telegram_sender,
     checkout_for_account,
     notify_admins_order_status,
-    
 )
 
 logger = logging.getLogger(__name__)
