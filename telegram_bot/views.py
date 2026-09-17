@@ -1,7 +1,9 @@
+from email.mime import text
 import html
 import logging
 import secrets
 from hmac import compare_digest
+from turtle import update
 from api.services import generate_unique_product_slug
 from django.conf import settings
 from django.http import JsonResponse
@@ -69,24 +71,40 @@ def _user_from_update(update):
 
 
 def _send(chat_id, text, markup=None):
+    return telegram_sender().send_message(
+        chat_id,
+        text,
+        markup,
+    )
+def _delete_message(chat_id, message_id):
     try:
-        return telegram_sender().send_message(chat_id, text, markup)
-    except TelegramAPIError:
-        logger.exception('Unable to send Telegram message')
-        return None
+        telegram_sender().delete_message(
+            chat_id,
+            message_id,
+        )
+    except Exception:
+        pass
 
 
+def _remove_buttons(chat_id, message_id):
+    try:
+        telegram_sender().edit_message_reply_markup(
+            chat_id,
+            message_id,
+            reply_markup=None,
+        )
+    except Exception:
+        pass
 def _send_product(chat_id, product, text, markup=None):
-    image = getattr(product, 'image', None)
-    image_url = getattr(image, 'url', None) if image else None
-    if image_url:
-        try:
-            return telegram_sender().send_photo(chat_id, image_url, text, markup)
-        except TelegramAPIError:
-            logger.exception('Unable to send Telegram product photo')
+    if product.image:
+        return telegram_sender().send_photo(
+            chat_id,
+            product.image.url,
+            caption=text,
+            reply_markup=markup,
+        )
+
     return _send(chat_id, text, markup)
-
-
 def _main(account, chat_id, text='Welcome to Beminet 👋'):
     _send(chat_id, text, keyboards.main_menu(account))
 
@@ -700,18 +718,28 @@ def _handle_photo(account, chat_id, photos):
                                   ))
 
 
-def _handle_callback(account, chat_id, callback_id, data):
+def _handle_callback(
+    account,
+    chat_id,
+    callback_id,
+    data,
+    message_id=None,
+):
     # Telegram requires every callback query to be answered.
     # Answer it exactly once here.
     _callback(chat_id, callback_id)
+
     if data == 'home':
         clear_state(account)
         _main(account, chat_id)
+
     elif data == 'shop':
         clear_state(account)
         _show_shop(chat_id)
+
     elif data.startswith('product_category:'):
         category = data.split(':', 1)[1]
+
         if conversation(account).state == 'seller_edit_category':
             product_id = conversation(account).data.get('product_id')
 
@@ -745,13 +773,16 @@ def _handle_callback(account, chat_id, callback_id, data):
             _send(
                 chat_id,
                 f'✅ <b>Product category updated!</b>\n\n'
-                f'New category: <b>{html.escape(allowed_categories[category])}</b>',
+                f'New category: '
+                f'<b>{html.escape(allowed_categories[category])}</b>',
                 {
                     'inline_keyboard': [
                         [
                             {
                                 'text': '✏️ Edit Again',
-                                'callback_data': f'seller_product_edit:{product.id}',
+                                'callback_data': (
+                                    f'seller_product_edit:{product.id}'
+                                ),
                             }
                         ],
                         [
@@ -801,114 +832,363 @@ def _handle_callback(account, chat_id, callback_id, data):
             **state_data,
         )
 
-        
+        _send(
+            chat_id,
+            f'✅ Category: '
+            f'<b>{html.escape(allowed_categories[category])}</b>\n\n'
+            'Enter the price in ETB.',
+        )
+
+    elif data.startswith('shop_page:'):
+        _show_shop(
+            chat_id,
+            int(data.split(':', 1)[1]),
+        )
+
+    elif data.startswith('category:'):
+        _show_category(
+            chat_id,
+            data.split(':', 1)[1],
+        )
+
+    elif data.startswith('product:'):
+        _show_product(
+            chat_id,
+            int(data.split(':')[1]),
+        )
+
+    elif data.startswith('add:') or data.startswith('buy:'):
+        buy_now = data.startswith('buy:')
+
+        product = (
+            _available_products()
+            .filter(pk=int(data.split(':')[1]))
+            .first()
+        )
+
+        if not product:
+            _send(
+                chat_id,
+                'Sorry, this product is currently unavailable.',
+            )
+            return
+
+        variants = list(
+            product.variants
+            .filter(is_active=True)
+            .order_by('id')
+        )
+
+        if len(variants) != 1:
+            if buy_now:
+                set_state(
+                    account,
+                    f'buy_variant:{product.id}',
+                )
+
+            _send(
+                chat_id,
+                'Choose a variant:',
+                keyboards.variants(
+                    variants,
+                    product.id,
+                ),
+            )
+            return
+
+        try:
+            add_to_cart(
+                account.user,
+                variants[0].id,
+                1,
+            )
+
+            if buy_now:
+                _address_prompt(
+                    account,
+                    chat_id,
+                )
+            else:
+                _send(
+                    chat_id,
+                    'Added to cart.',
+                    {
+                        'inline_keyboard': [
+                            [
+                                {
+                                    'text': 'View Cart',
+                                    'callback_data': 'cart',
+                                }
+                            ]
+                        ]
+                    },
+                )
+
+        except Exception as exc:
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
+
+    elif data.startswith('variant:'):
+        _, product_id, variant_id = data.split(':')
+
+        try:
+            add_to_cart(
+                account.user,
+                int(variant_id),
+                1,
+            )
+
+            if conversation(account).state == f'buy_variant:{product_id}':
+                clear_state(account)
+
+                _address_prompt(
+                    account,
+                    chat_id,
+                )
+                return
+
+            _send(
+                chat_id,
+                '✅ Added to cart.',
+                {
+                    'inline_keyboard': [
+                        [
+                            {
+                                'text': '🛒 View Cart',
+                                'callback_data': 'cart',
+                            },
+                            {
+                                'text': '🛍 Continue Shopping',
+                                'callback_data': 'shop',
+                            },
+                        ]
+                    ]
+                },
+            )
+
+        except Exception as exc:
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
+
+    elif data == 'cart':
+        _show_cart(
+            account,
+            chat_id,
+        )
+
+    elif data == 'checkout':
+        if (
+            not hasattr(account.user, 'cart')
+            or not account.user.cart.items.exists()
+        ):
+            _send(
+                chat_id,
+                'Your cart is empty.',
+            )
+        else:
+            _address_prompt(
+                account,
+                chat_id,
+            )
+
+    elif data.startswith('address:'):
+        _checkout_summary(
+            account,
+            chat_id,
+            int(data.split(':')[1]),
+        )
+
+    elif data == 'new_address':
+        set_state(
+            account,
+            'address_area',
+        )
 
         _send(
             chat_id,
-            f'✅ Category: <b>{html.escape(allowed_categories[category])}</b>\n\n'
-            'Enter the price in ETB.',
+            'What area in Hossana are you in?',
         )
-    elif data.startswith('shop_page:'):
-        _show_shop(chat_id, int(data.split(':', 1)[1]))
-    elif data.startswith('category:'):
-        _show_category(chat_id, data.split(':', 1)[1])
-    elif data.startswith('product:'):
-        _show_product(chat_id, int(data.split(':')[1]))
-    elif data.startswith('add:') or data.startswith('buy:'):
-        buy_now = data.startswith('buy:')
-        product = _available_products().filter(pk=int(data.split(':')[1])).first()
-        if not product:
-            _send(chat_id, 'Sorry, this product is currently unavailable.')
-            return
-        variants = list(product.variants.filter(is_active=True).order_by('id'))
-        if len(variants) != 1:
-            if buy_now:
-                set_state(account, f'buy_variant:{product.id}')
-            _send(chat_id, 'Choose a variant:', keyboards.variants(variants, product.id))
-            return
-        try:
-            add_to_cart(account.user, variants[0].id, 1)
-            if buy_now:
-                _address_prompt(account, chat_id)
-            else:
-                _send(chat_id, 'Added to cart.', {'inline_keyboard': [[{'text': 'View Cart', 'callback_data': 'cart'}]]})
-        except Exception as exc:
-            _send(chat_id, safe_error(exc))
-    elif data.startswith('variant:'):
-        _, product_id, variant_id = data.split(':')
-        try:
-            add_to_cart(account.user, int(variant_id), 1)
-            if conversation(account).state == f'buy_variant:{product_id}':
-                clear_state(account)
-                _address_prompt(account, chat_id)
-                return
-            _send(chat_id, '✅ Added to cart.', {'inline_keyboard': [[{'text': '🛒 View Cart', 'callback_data': 'cart'}, {'text': '🛍 Continue Shopping', 'callback_data': 'shop'}]]})
-        except Exception as exc:
-            _send(chat_id, safe_error(exc))
-    elif data == 'cart':
-        _show_cart(account, chat_id)
-    elif data == 'checkout':
-        if not hasattr(account.user, 'cart') or not account.user.cart.items.exists():
-            _send(chat_id, 'Your cart is empty.')
-        else:
-            _address_prompt(account, chat_id)
-    elif data.startswith('address:'):
-        _checkout_summary(account, chat_id, int(data.split(':')[1]))
-    elif data == 'new_address':
-        set_state(account, 'address_area')
-        _send(chat_id, 'What area in Hossana are you in?')
+
     elif data == 'confirm_checkout':
         state = conversation(account)
+
         try:
-            order = checkout_for_account(account, state.data['address_id'], state.data['idempotency_key'])
+            order = checkout_for_account(
+                account,
+                state.data['address_id'],
+                state.data['idempotency_key'],
+            )
+
             clear_state(account)
-            _send(chat_id, f'✅ <b>Order placed!</b>\n\nOrder: {order.order_number}\nTotal: {money(order.total)} ETB\nPayment: Cash on Delivery', {'inline_keyboard': [[{'text': '📦 Track Order', 'callback_data': f'track:{order.pk}'}], [{'text': '🏠 Main Menu', 'callback_data': 'home'}]]})
+
+            _send(
+                chat_id,
+                f'✅ <b>Order placed!</b>\n\n'
+                f'Order: {order.order_number}\n'
+                f'Total: {money(order.total)} ETB\n'
+                f'Payment: Cash on Delivery',
+                {
+                    'inline_keyboard': [
+                        [
+                            {
+                                'text': '📦 Track Order',
+                                'callback_data': (
+                                    f'track:{order.pk}'
+                                ),
+                            }
+                        ],
+                        [
+                            {
+                                'text': '🏠 Main Menu',
+                                'callback_data': 'home',
+                            }
+                        ],
+                    ]
+                },
+            )
+
         except Exception as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
+
     elif data == 'orders':
-        _show_orders(account, chat_id)
+        _show_orders(
+            account,
+            chat_id,
+        )
+
     elif data.startswith('order:'):
-        _show_order(account, chat_id, int(data.split(':')[1]))
+        _show_order(
+            account,
+            chat_id,
+            int(data.split(':')[1]),
+        )
+
     elif data.startswith('track:'):
-        order = account.user.order_set.filter(pk=int(data.split(':')[1])).first()
-        _send(chat_id, tracking_text(order) if order else 'That order was not found.')
+        order = (
+            account.user.order_set
+            .filter(pk=int(data.split(':')[1]))
+            .first()
+        )
+
+        _send(
+            chat_id,
+            tracking_text(order)
+            if order
+            else 'That order was not found.',
+        )
+
     elif data == 'account':
-        _send(chat_id, f'👤 <b>{html.escape(account.user.username)}</b>\nPhone: {html.escape(account.user.phone_number or "Not set")}', keyboards.main_menu(account))
+        _send(
+            chat_id,
+            f'👤 <b>{html.escape(account.user.username)}</b>\n'
+            f'Phone: '
+            f'{html.escape(account.user.phone_number or "Not set")}',
+            keyboards.main_menu(account),
+        )
+
     elif data == 'help':
-        _send(chat_id, 'Use the buttons to browse, manage your cart, checkout with COD, or apply as a seller.', keyboards.main_menu(account))
+        _send(
+            chat_id,
+            'Use the buttons to browse, manage your cart, '
+            'checkout with COD, or apply as a seller.',
+            keyboards.main_menu(account),
+        )
+
     elif data == 'seller_register' or data == 'seller':
-        _show_seller(account, chat_id)
+        _show_seller(
+            account,
+            chat_id,
+        )
+
     elif data == 'seller_add':
-        if not getattr(account.user, 'seller_profile', None) or account.user.seller_profile.status != 'active':
-            _send(chat_id, 'Your seller profile must be active before adding products.')
+        seller = getattr(
+            account.user,
+            'seller_profile',
+            None,
+        )
+
+        if not seller or seller.status != 'active':
+            _send(
+                chat_id,
+                'Your seller profile must be active '
+                'before adding products.',
+            )
         else:
-            set_state(account, 'product_name')
-            _send(chat_id, 'Enter the product name.')
+            set_state(
+                account,
+                'product_name',
+            )
+
+            _send(
+                chat_id,
+                'Enter the product name.',
+            )
+
     elif data == 'seller_products':
-        _show_seller_products(account, chat_id)
+        _show_seller_products(
+            account,
+            chat_id,
+        )
+
     elif data == 'seller_orders':
-        _show_seller_orders(account, chat_id)
+        _show_seller_orders(
+            account,
+            chat_id,
+        )
+
     elif data.startswith('seller_order:'):
-        _show_seller_order(account, chat_id, int(data.split(':')[1]))
+        _show_seller_order(
+            account,
+            chat_id,
+            int(data.split(':', 1)[1]),
+        )
+
+    # ---------------------------------------------------------
+    # SELLER ORDER ACCEPT
+    # ---------------------------------------------------------
     elif data.startswith('seller_order_accept:'):
-        seller = getattr(account.user, 'seller_profile', None)
+        seller = getattr(
+            account.user,
+            'seller_profile',
+            None,
+        )
 
         if not seller:
-            _send(chat_id, '❌ You are not registered as a seller.')
+            _send(
+                chat_id,
+                '❌ You are not registered as a seller.',
+            )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order = seller_orders(account).filter(pk=order_id).first()
+        order = (
+            seller_orders(account)
+            .filter(pk=order_id)
+            .first()
+        )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
         if order.status != OrderStatus.PENDING:
             _send(
                 chat_id,
-                f'⚠️ This order is already <b>{order.status}</b>.'
+                f'⚠️ This order is already '
+                f'<b>{order.status}</b>.',
             )
             return
 
@@ -924,35 +1204,66 @@ def _handle_callback(account, chat_id, callback_id, data):
             )
 
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Accept / Reject buttons.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
             f'✅ <b>Order Accepted</b>\n\n'
             f'Order: #{order.order_number}\n'
             f'Status: <b>{order.status}</b>\n\n'
-            'The admin has been notified.'
+            'The admin has been notified.',
         )
+
+    # ---------------------------------------------------------
+    # SELLER ORDER REJECT
+    # ---------------------------------------------------------
     elif data.startswith('seller_order_reject:'):
-        seller = getattr(account.user, 'seller_profile', None)
+        seller = getattr(
+            account.user,
+            'seller_profile',
+            None,
+        )
 
         if not seller:
-            _send(chat_id, '❌ You are not registered as a seller.')
+            _send(
+                chat_id,
+                '❌ You are not registered as a seller.',
+            )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order = seller_orders(account).filter(pk=order_id).first()
+        order = (
+            seller_orders(account)
+            .filter(pk=order_id)
+            .first()
+        )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
         if order.status != OrderStatus.PENDING:
             _send(
                 chat_id,
-                f'⚠️ This order is already <b>{order.status}</b>.'
+                f'⚠️ This order is already '
+                f'<b>{order.status}</b>.',
             )
             return
 
@@ -968,8 +1279,18 @@ def _handle_callback(account, chat_id, callback_id, data):
             )
 
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Accept / Reject buttons.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
@@ -977,12 +1298,21 @@ def _handle_callback(account, chat_id, callback_id, data):
             f'Order: #{order.order_number}\n'
             f'Status: <b>{order.status}</b>\n\n'
             'Reserved stock has been released.\n'
-            'The admin has been notified.'
+            'The admin has been notified.',
         )
+
     elif data == 'seller_settlements':
-        _show_settlements(account, chat_id)
-    elif data in ('seller_product_submit', 'seller_product_draft'):
+        _show_settlements(
+            account,
+            chat_id,
+        )
+
+    elif data in (
+        'seller_product_submit',
+        'seller_product_draft',
+    ):
         state = conversation(account)
+
         try:
             product = create_product_from_state(
                 account,
@@ -993,20 +1323,42 @@ def _handle_callback(account, chat_id, callback_id, data):
                     else Products.Status.DRAFT
                 ),
             )
+
             if data == 'seller_product_submit':
                 message = 'Product submitted for review.'
             else:
                 message = '📝 Product saved as draft.'
+
             clear_state(account)
-            _send(chat_id, message, keyboards.main_menu(account))
+
+            _send(
+                chat_id,
+                message,
+                keyboards.main_menu(account),
+            )
+
         except Exception as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
+
     elif data.startswith('seller_product_edit:'):
-        product_id = int(data.split(':', 1)[1])
-        product = seller_products(account).filter(pk=product_id).first()
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
 
         if not product:
-            _send(chat_id, '❌ Product not found.')
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
             return
 
         _send(
@@ -1018,94 +1370,133 @@ def _handle_callback(account, chat_id, callback_id, data):
                     [
                         {
                             'text': '📝 Name',
-                            'callback_data': f'seller_edit_name:{product.id}',
+                            'callback_data': (
+                                f'seller_edit_name:{product.id}'
+                            ),
                         },
                     ],
                     [
                         {
                             'text': '📄 Description',
-                            'callback_data': f'seller_edit_description:{product.id}',
+                            'callback_data': (
+                                f'seller_edit_description:{product.id}'
+                            ),
                         },
                     ],
                     [
                         {
                             'text': '💰 Price',
-                            'callback_data': f'seller_edit_price:{product.id}',
+                            'callback_data': (
+                                f'seller_edit_price:{product.id}'
+                            ),
                         },
                     ],
                     [
                         {
                             'text': '📦 Stock',
-                            'callback_data': f'seller_edit_stock:{product.id}',
+                            'callback_data': (
+                                f'seller_edit_stock:{product.id}'
+                            ),
                         },
                     ],
                     [
                         {
                             'text': '📂 Category',
-                            'callback_data': f'seller_edit_category:{product.id}',
+                            'callback_data': (
+                                f'seller_edit_category:{product.id}'
+                            ),
                         },
                     ],
                     [
                         {
                             'text': '↩️ Back',
-                            'callback_data': f'seller_product:{product.id}',
-                        }
+                            'callback_data': (
+                                f'seller_product:{product.id}'
+                            ),
+                        },
                     ],
                 ]
             },
         )
+
     elif data.startswith('seller_product_delete:'):
-            product_id = int(data.split(':', 1)[1])
-            product = seller_products(account).filter(pk=product_id).first()
-    
-            if not product:
-                _send(chat_id, '❌ Product not found.')
-                return
-    
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
+
+        if not product:
             _send(
                 chat_id,
-                f'⚠️ <b>Delete Product?</b>\n\n'
-                f'{html.escape(product.name)}\n\n'
-                'This action cannot be undone.',
-                {
-                    'inline_keyboard': [
-                        [
-                            {
-                                'text': '🗑 Yes, Delete',
-                                'callback_data': f'seller_product_delete_confirm:{product.id}',
-                            }
-                        ],
-                        [
-                            {
-                                'text': '❌ Cancel',
-                                'callback_data': f'seller_product:{product.id}',
-                            }
-                        ],
-                    ]
-                },
+                '❌ Product not found.',
+            )
+            return
+
+        _send(
+            chat_id,
+            f'⚠️ <b>Delete Product?</b>\n\n'
+            f'{html.escape(product.name)}\n\n'
+            'This action cannot be undone.',
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '🗑 Yes, Delete',
+                            'callback_data': (
+                                f'seller_product_delete_confirm:{product.id}'
+                            ),
+                        }
+                    ],
+                    [
+                        {
+                            'text': '❌ Cancel',
+                            'callback_data': (
+                                f'seller_product:{product.id}'
+                            ),
+                        },
+                    ],
+                ]
+            },
         )
-    
+
+    # ---------------------------------------------------------
+    # ADMIN — START PROCESSING
+    # ---------------------------------------------------------
     elif data.startswith('admin_order_processing:'):
         if not account.user.is_staff:
             _send(
                 chat_id,
-                '❌ You are not authorized to process orders.'
+                '❌ You are not authorized to process orders.',
             )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order = Order.objects.filter(pk=order_id).first()
+        order = (
+            Order.objects
+            .filter(pk=order_id)
+            .first()
+        )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
         if order.status != OrderStatus.CONFIRMED:
             _send(
                 chat_id,
                 f'⚠️ This order is <b>{order.status}</b>. '
-                'Only confirmed orders can start processing.'
+                'Only confirmed orders can start processing.',
             )
             return
 
@@ -1114,38 +1505,64 @@ def _handle_callback(account, chat_id, callback_id, data):
                 order,
                 OrderStatus.PROCESSING,
             )
+
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Start Processing button.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
             f'⚙️ <b>Order Processing Started</b>\n\n'
             f'Order: #{order.order_number}\n'
             f'Status: <b>{order.status}</b>',
-            admin_processing_order_actions(order.id),
+            admin_processing_order_actions(
+                order.id
+            ),
         )
+
+    # ---------------------------------------------------------
+    # ADMIN — READY FOR DELIVERY
+    # ---------------------------------------------------------
     elif data.startswith('admin_order_ready:'):
         if not account.user.is_staff:
             _send(
                 chat_id,
-                '❌ You are not authorized to manage orders.'
+                '❌ You are not authorized to manage orders.',
             )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order = Order.objects.filter(pk=order_id).first()
+        order = (
+            Order.objects
+            .filter(pk=order_id)
+            .first()
+        )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
         if order.status != OrderStatus.PROCESSING:
             _send(
                 chat_id,
                 f'⚠️ This order is <b>{order.status}</b>. '
-                'Only processing orders can be marked ready.'
+                'Only processing orders can be marked ready.',
             )
             return
 
@@ -1154,26 +1571,45 @@ def _handle_callback(account, chat_id, callback_id, data):
                 order,
                 OrderStatus.READY_FOR_DELIVERY,
             )
+
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Ready for Delivery button.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
             f'📦 <b>Order Ready for Delivery</b>\n\n'
             f'Order: #{order.order_number}\n'
             f'Status: <b>{order.status}</b>',
-            admin_ready_order_actions(order.id),
+            admin_ready_order_actions(
+                order.id
+            ),
         )
+
+    # ---------------------------------------------------------
+    # ADMIN — OUT FOR DELIVERY
+    # ---------------------------------------------------------
     elif data.startswith('admin_order_out:'):
         if not account.user.is_staff:
             _send(
                 chat_id,
-                '❌ You are not authorized to manage orders.'
+                '❌ You are not authorized to manage orders.',
             )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
         order = (
             Order.objects
@@ -1183,23 +1619,30 @@ def _handle_callback(account, chat_id, callback_id, data):
         )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
         if order.status != OrderStatus.READY_FOR_DELIVERY:
             _send(
                 chat_id,
                 f'⚠️ This order is <b>{order.status}</b>. '
-                'Only ready orders can go out for delivery.'
+                'Only ready orders can go out for delivery.',
             )
             return
 
-        delivery = getattr(order, 'delivery', None)
+        delivery = getattr(
+            order,
+            'delivery',
+            None,
+        )
 
         if not delivery:
             _send(
                 chat_id,
-                '❌ This order does not have a delivery record.'
+                '❌ This order does not have a delivery record.',
             )
             return
 
@@ -1210,14 +1653,24 @@ def _handle_callback(account, chat_id, callback_id, data):
                     OrderStatus.OUT_FOR_DELIVERY,
                 )
 
-                transition_delivery(
+                delivery = transition_delivery(
                     delivery,
                     Delivery.Status.OUT_FOR_DELIVERY,
                 )
 
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Out for Delivery button.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
@@ -1226,40 +1679,58 @@ def _handle_callback(account, chat_id, callback_id, data):
             f'Order Status: <b>{order.status}</b>\n'
             f'Delivery Status: <b>{delivery.status}</b>\n\n'
             f'Admin can now manage the delivery.',
-            keyboards.admin_out_for_delivery_actions(order.id),
+            keyboards.admin_out_for_delivery_actions(
+                order.id
+            ),
         )
+
+    # ---------------------------------------------------------
+    # ADMIN — DELIVERED
+    # ---------------------------------------------------------
     elif data.startswith('admin_delivery_delivered:'):
         if not account.user.is_staff:
             _send(
                 chat_id,
-                '❌ You are not authorized to manage deliveries.'
+                '❌ You are not authorized to manage deliveries.',
             )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order = Order.objects.filter(
-            pk=order_id
-        ).select_related('delivery').first()
+        order = (
+            Order.objects
+            .filter(pk=order_id)
+            .select_related('delivery')
+            .first()
+        )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
         if order.status != OrderStatus.OUT_FOR_DELIVERY:
             _send(
                 chat_id,
                 f'⚠️ This order is <b>{order.status}</b>. '
-                'Only orders out for delivery can be delivered.'
+                'Only orders out for delivery can be delivered.',
             )
             return
 
-        delivery = getattr(order, 'delivery', None)
+        delivery = getattr(
+            order,
+            'delivery',
+            None,
+        )
 
         if not delivery:
             _send(
                 chat_id,
-                '❌ No delivery record exists for this order.'
+                '❌ No delivery record exists for this order.',
             )
             return
 
@@ -1268,9 +1739,20 @@ def _handle_callback(account, chat_id, callback_id, data):
                 delivery,
                 Delivery.Status.DELIVERED,
             )
+
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Delivered / Failed buttons.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
@@ -1285,44 +1767,62 @@ def _handle_callback(account, chat_id, callback_id, data):
                     [
                         {
                             'text': '📋 View Order',
-                            'callback_data': f'admin_order:{order.id}',
+                            'callback_data': (
+                                f'admin_order:{order.id}'
+                            ),
                         }
                     ]
                 ]
             },
         )
+
+    # ---------------------------------------------------------
+    # ADMIN — DELIVERY FAILED
+    # ---------------------------------------------------------
     elif data.startswith('admin_delivery_failed:'):
         if not account.user.is_staff:
             _send(
                 chat_id,
-                '❌ You are not authorized to manage deliveries.'
+                '❌ You are not authorized to manage deliveries.',
             )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order = Order.objects.filter(
-            pk=order_id
-        ).select_related('delivery').first()
+        order = (
+            Order.objects
+            .filter(pk=order_id)
+            .select_related('delivery')
+            .first()
+        )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
         if order.status != OrderStatus.OUT_FOR_DELIVERY:
             _send(
                 chat_id,
                 f'⚠️ This order is <b>{order.status}</b>. '
-                'Only orders out for delivery can fail.'
+                'Only orders out for delivery can fail.',
             )
             return
 
-        delivery = getattr(order, 'delivery', None)
+        delivery = getattr(
+            order,
+            'delivery',
+            None,
+        )
 
         if not delivery:
             _send(
                 chat_id,
-                '❌ No delivery record exists for this order.'
+                '❌ No delivery record exists for this order.',
             )
             return
 
@@ -1332,9 +1832,20 @@ def _handle_callback(account, chat_id, callback_id, data):
                 Delivery.Status.FAILED,
                 failure_reason='Delivery failed.',
             )
+
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Delivered / Failed buttons.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
@@ -1347,61 +1858,93 @@ def _handle_callback(account, chat_id, callback_id, data):
                     [
                         {
                             'text': '↩️ Return Order',
-                            'callback_data': f'admin_delivery_return:{order.id}',
+                            'callback_data': (
+                                f'admin_delivery_return:{order.id}'
+                            ),
                         }
                     ],
                     [
                         {
                             'text': '📋 View Order',
-                            'callback_data': f'admin_order:{order.id}',
+                            'callback_data': (
+                                f'admin_order:{order.id}'
+                            ),
                         }
                     ],
                 ]
             },
         )
+
+    # ---------------------------------------------------------
+    # ADMIN — RETURN ORDER
+    # ---------------------------------------------------------
     elif data.startswith('admin_delivery_return:'):
         if not account.user.is_staff:
             _send(
                 chat_id,
-                '❌ You are not authorized to manage deliveries.'
+                '❌ You are not authorized to manage deliveries.',
             )
             return
 
-        order_id = int(data.split(':', 1)[1])
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order = Order.objects.filter(
-            pk=order_id
-        ).select_related('delivery').first()
+        order = (
+            Order.objects
+            .filter(pk=order_id)
+            .select_related('delivery')
+            .first()
+        )
 
         if not order:
-            _send(chat_id, '❌ That order was not found.')
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
             return
 
-        delivery = getattr(order, 'delivery', None)
+        delivery = getattr(
+            order,
+            'delivery',
+            None,
+        )
 
         if not delivery:
             _send(
                 chat_id,
-                '❌ No delivery record exists for this order.'
+                '❌ No delivery record exists for this order.',
             )
             return
 
         if delivery.status != Delivery.Status.FAILED:
             _send(
                 chat_id,
-                f'⚠️ Delivery is currently <b>{delivery.status}</b>. '
-                'Only failed deliveries can be returned.'
+                f'⚠️ Delivery is currently '
+                f'<b>{delivery.status}</b>. '
+                'Only failed deliveries can be returned.',
             )
             return
 
         try:
-            transition_delivery(
+            delivery = transition_delivery(
                 delivery,
                 Delivery.Status.RETURNED,
             )
+
         except ValidationError as exc:
-            _send(chat_id, safe_error(exc))
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
             return
+
+        # Remove stale Return Order button.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
 
         _send(
             chat_id,
@@ -1413,52 +1956,83 @@ def _handle_callback(account, chat_id, callback_id, data):
                     [
                         {
                             'text': '📋 View Order',
-                            'callback_data': f'admin_order:{order.id}',
+                            'callback_data': (
+                                f'admin_order:{order.id}'
+                            ),
                         }
                     ]
                 ]
             },
         )
-    
-    elif data.startswith('seller_product_delete_confirm:'):
-            product_id = int(data.split(':', 1)[1])
-    
-            product = seller_products(account).filter(pk=product_id).first()
-    
-            if not product:
-                _send(chat_id, '❌ Product not found.')
-                return
-    
-            product_name = product.name
-            product.delete()
-    
-            _send(
-                chat_id,
-                f'🗑 <b>{html.escape(product_name)}</b> was deleted.',
-                {
-                    'inline_keyboard': [
-                        [
-                            {
-                                'text': '📦 My Products',
-                                'callback_data': 'seller_products',
-                            }
-                        ],
-                        [
-                            {
-                                'text': '↩️ Seller Dashboard',
-                                'callback_data': 'seller',
-                            }
-                        ],
-                    ]
-                },
-            )
-    elif data.startswith('seller_edit_name:'):
-        product_id = int(data.split(':', 1)[1])
 
-        product = seller_products(account).filter(pk=product_id).first()
+    # ---------------------------------------------------------
+    # SELLER — DELETE PRODUCT CONFIRM
+    # ---------------------------------------------------------
+    elif data.startswith('seller_product_delete_confirm:'):
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
 
         if not product:
-            _send(chat_id, '❌ Product not found.')
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
+            return
+
+        product_name = product.name
+        product.delete()
+
+        # Remove the old delete confirmation buttons.
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
+
+        _send(
+            chat_id,
+            f'🗑 <b>{html.escape(product_name)}</b> was deleted.',
+            {
+                'inline_keyboard': [
+                    [
+                        {
+                            'text': '📦 My Products',
+                            'callback_data': 'seller_products',
+                        }
+                    ],
+                    [
+                        {
+                            'text': '↩️ Seller Dashboard',
+                            'callback_data': 'seller',
+                        }
+                    ],
+                ]
+            },
+        )
+
+    elif data.startswith('seller_edit_name:'):
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
+
+        if not product:
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
             return
 
         set_state(
@@ -1470,15 +2044,27 @@ def _handle_callback(account, chat_id, callback_id, data):
         _send(
             chat_id,
             f'✏️ <b>Edit Product Name</b>\n\n'
-            f'Current name: <b>{html.escape(product.name)}</b>\n\n'
+            f'Current name: '
+            f'<b>{html.escape(product.name)}</b>\n\n'
             'Enter the new product name:',
         )
+
     elif data.startswith('seller_edit_description:'):
-        product_id = int(data.split(':', 1)[1])
-        product = seller_products(account).filter(pk=product_id).first()
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
 
         if not product:
-            _send(chat_id, '❌ Product not found.')
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
             return
 
         set_state(
@@ -1496,12 +2082,21 @@ def _handle_callback(account, chat_id, callback_id, data):
         )
 
     elif data.startswith('seller_edit_price:'):
-        product_id = int(data.split(':', 1)[1])
+        product_id = int(
+            data.split(':', 1)[1]
+        )
 
-        product = seller_products(account).filter(pk=product_id).first()
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
 
         if not product:
-            _send(chat_id, '❌ Product not found.')
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
             return
 
         set_state(
@@ -1516,19 +2111,32 @@ def _handle_callback(account, chat_id, callback_id, data):
             f'Current price: <b>{product.price} ETB</b>\n\n'
             'Enter the new price in ETB:',
         )
-    elif data.startswith('seller_edit_stock:'):
-        product_id = int(data.split(':', 1)[1])
 
-        product = seller_products(account).filter(pk=product_id).first()
+    elif data.startswith('seller_edit_stock:'):
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
 
         if not product:
-            _send(chat_id, '❌ Product not found.')
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
             return
 
         variant = product.variants.first()
 
         if not variant or not hasattr(variant, 'inventory'):
-            _send(chat_id, '❌ Product inventory was not found.')
+            _send(
+                chat_id,
+                '❌ Product inventory was not found.',
+            )
             return
 
         set_state(
@@ -1540,16 +2148,27 @@ def _handle_callback(account, chat_id, callback_id, data):
         _send(
             chat_id,
             f'📦 <b>Edit Product Stock</b>\n\n'
-            f'Current stock: <b>{variant.inventory.quantity_available}</b>\n\n'
+            f'Current stock: '
+            f'<b>{variant.inventory.quantity_available}</b>\n\n'
             'Enter the new stock quantity:',
         )
-    elif data.startswith('seller_edit_category:'):
-        product_id = int(data.split(':', 1)[1])
 
-        product = seller_products(account).filter(pk=product_id).first()
+    elif data.startswith('seller_edit_category:'):
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
 
         if not product:
-            _send(chat_id, '❌ Product not found.')
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
             return
 
         set_state(
@@ -1561,23 +2180,36 @@ def _handle_callback(account, chat_id, callback_id, data):
         _send(
             chat_id,
             f'📂 <b>Edit Product Category</b>\n\n'
-            f'Current category: <b>{html.escape(product.category)}</b>\n\n'
+            f'Current category: '
+            f'<b>{html.escape(product.category)}</b>\n\n'
             'Choose the new category:',
             keyboards.product_categories(),
         )
+
     elif data.startswith('seller_product:'):
-        product_id = int(data.split(':', 1)[1])
-        product = seller_products(account).filter(pk=product_id).first()
+        product_id = int(
+            data.split(':', 1)[1]
+        )
+
+        product = (
+            seller_products(account)
+            .filter(pk=product_id)
+            .first()
+        )
 
         if not product:
-            _send(chat_id, '❌ Product not found.')
+            _send(
+                chat_id,
+                '❌ Product not found.',
+            )
             return
 
         variant = product.variants.first()
 
         stock = (
             variant.inventory.quantity_available
-            if variant and hasattr(variant, 'inventory')
+            if variant
+            and hasattr(variant, 'inventory')
             else 0
         )
 
@@ -1590,13 +2222,17 @@ def _handle_callback(account, chat_id, callback_id, data):
 
         status = status_labels.get(
             product.status,
-            product.status.replace('_', ' ').title(),
+            product.status.replace(
+                '_',
+                ' ',
+            ).title(),
         )
 
         text = (
             f'📦 <b>{html.escape(product.name)}</b>\n\n'
             f'<b>Status:</b> {status}\n'
-            f'<b>Category:</b> {html.escape(product.category or "Other")}\n'
+            f'<b>Category:</b> '
+            f'{html.escape(product.category or "Other")}\n'
             f'<b>Price:</b> {money(product.price)}\n'
             f'<b>Stock:</b> {stock}\n\n'
             f'<b>Description:</b>\n'
@@ -1608,11 +2244,15 @@ def _handle_callback(account, chat_id, callback_id, data):
                 [
                     {
                         'text': '✏️ Edit',
-                        'callback_data': f'seller_product_edit:{product.id}',
+                        'callback_data': (
+                            f'seller_product_edit:{product.id}'
+                        ),
                     },
                     {
                         'text': '🗑 Delete',
-                        'callback_data': f'seller_product_delete:{product.id}',
+                        'callback_data': (
+                            f'seller_product_delete:{product.id}'
+                        ),
                     },
                 ],
                 [
@@ -1630,33 +2270,111 @@ def _handle_callback(account, chat_id, callback_id, data):
             text,
             markup,
         )
+
     elif data == 'cart_update' or data == 'cart_remove':
-        cart = account.user.cart if hasattr(account.user, 'cart') else None
-        items = list(cart.items.select_related('product', 'variant').all()) if cart else []
+        cart = (
+            account.user.cart
+            if hasattr(account.user, 'cart')
+            else None
+        )
+
+        items = (
+            list(
+                cart.items
+                .select_related(
+                    'product',
+                    'variant',
+                )
+                .all()
+            )
+            if cart
+            else []
+        )
+
         if not items:
-            _send(chat_id, 'Your cart is empty.')
+            _send(
+                chat_id,
+                'Your cart is empty.',
+            )
             return
-        action = 'cartqty' if data == 'cart_update' else 'cartremove'
-        rows = [[{'text': f'{item.product.name} × {item.quantity}', 'callback_data': f'{action}:{item.id}'}] for item in items]
-        rows.append([{'text': '↩️ Back to Cart', 'callback_data': 'cart'}])
-        _send(chat_id, 'Choose an item:', {'inline_keyboard': rows})
+
+        action = (
+            'cartqty'
+            if data == 'cart_update'
+            else 'cartremove'
+        )
+
+        rows = [
+            [
+                {
+                    'text': (
+                        f'{item.product.name} × '
+                        f'{item.quantity}'
+                    ),
+                    'callback_data': (
+                        f'{action}:{item.id}'
+                    ),
+                }
+            ]
+            for item in items
+        ]
+
+        rows.append(
+            [
+                {
+                    'text': '↩️ Back to Cart',
+                    'callback_data': 'cart',
+                }
+            ]
+        )
+
+        _send(
+            chat_id,
+            'Choose an item:',
+            {
+                'inline_keyboard': rows,
+            },
+        )
+
     elif data.startswith('cartqty:'):
-        set_state(account, f'cart_quantity:{int(data.split(":")[1])}')
-        _send(chat_id, 'Enter the new positive quantity.')
-   
+        set_state(
+            account,
+            f'cart_quantity:{int(data.split(":")[1])}',
+        )
+
+        _send(
+            chat_id,
+            'Enter the new positive quantity.',
+        )
+
     elif data.startswith('cartremove:'):
         try:
-            remove_cart_item(account.user, int(data.split(':')[1]))
-            _show_cart(account, chat_id)
+            remove_cart_item(
+                account.user,
+                int(data.split(':')[1]),
+            )
+
+            _show_cart(
+                account,
+                chat_id,
+            )
+
         except Exception as exc:
-            _send(chat_id, safe_error(exc))
-    
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
+
     elif data.startswith('admin_order:'):
+        order_id = int(
+            data.split(':', 1)[1]
+        )
 
-        order_id = int(data.split(':', 1)[1])
-
-        _show_admin_order(account, chat_id, order_id)
-   
+        _show_admin_order(
+            account,
+            chat_id,
+            order_id,
+        )
 def process_update(update):
     telegram_user, chat_id, text = _user_from_update(update)
     if not telegram_user or chat_id is None:
@@ -1671,9 +2389,19 @@ def process_update(update):
     state.save(update_fields=['last_update_id', 'updated_at'])
     callback = update.get('callback_query')
     if callback:
-        _handle_callback(account, chat_id, callback['id'], callback.get('data', ''))
+        message_id = callback.get('message', {}).get('message_id')
+
+        _handle_callback(
+            account,
+            chat_id,
+            callback['id'],
+            callback.get('data', ''),
+            message_id,
+        )
+
     elif update.get('message', {}).get('photo'):
         _handle_photo(account, chat_id, update['message']['photo'])
+
     else:
         _handle_text(account, chat_id, text)
 

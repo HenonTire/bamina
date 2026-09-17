@@ -352,6 +352,49 @@ class TelegramClient:
         if reply_markup:
             payload['reply_markup'] = reply_markup
         return self.call('sendPhoto', payload)
+    def delete_message(self, chat_id, message_id):
+        return self.call(
+            'deleteMessage',
+            {
+                'chat_id': chat_id,
+                'message_id': message_id,
+            },
+        )
+
+    def edit_message_text(
+        self,
+        chat_id,
+        message_id,
+        text,
+        reply_markup=None,
+    ):
+        payload = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+            'text': text,
+            'parse_mode': 'HTML',
+        }
+
+        if reply_markup:
+            payload['reply_markup'] = reply_markup
+
+        return self.call('editMessageText', payload)
+
+    def edit_message_reply_markup(
+        self,
+        chat_id,
+        message_id,
+        reply_markup=None,
+    ):
+        payload = {
+            'chat_id': chat_id,
+            'message_id': message_id,
+        }
+
+        if reply_markup is not None:
+            payload['reply_markup'] = reply_markup
+
+        return self.call('editMessageReplyMarkup', payload)
 
     def answer_callback(self, callback_id, text=''):
         return self.call('answerCallbackQuery', {'callback_query_id': callback_id, 'text': text})
