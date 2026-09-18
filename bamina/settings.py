@@ -227,7 +227,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5501",
     "http://localhost:5501",
     "https://bamina.vercel.app",
-    "http://bami-ecommerce.vercel.app"
+    "https://bami-ecommerce.vercel.app"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -243,8 +243,8 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=72),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=60),
     "AUTH_HEADER_TYPES": ("Bearer",),
-    "BLACKLIST_AFTER_ROTATION": True,
-    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": False,
+    "ROTATE_REFRESH_TOKENS": False,
 }
 
 
