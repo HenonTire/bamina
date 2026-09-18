@@ -215,31 +215,73 @@ class WhishlistDetailView(RetrieveUpdateDestroyAPIView):
             products__shop__shope_id=shop_id
         )
 
-
 class AddToCartView(CreateAPIView):
     serializer_class = CartItemSerializer
     permission_classes = [IsAuthenticated]
 
     def perform_create(self, serializer):
         product_id = self.request.data.get('product_id')
+
         product = get_object_or_404(
-            Products, id=product_id, shop__shope_id=self.kwargs.get('shop_id'))
+            Products,
+            id=product_id,
+            shop__shope_id=self.kwargs.get('shop_id'),
+        )
 
-        # Check if item already in cart for this user and product
-        cart_item, created = CartItem.objects.get_or_create(
-            user=self.request.user, product=product)
-        if not created:
-            raise ValidationError("Product already in cart")
+        # Get or create the new central cart
+        cart = get_cart(self.request.user)
 
-        cart_item.save()
+        # Get the product's active variant.
+        variant = get_or_create_variant(product)
+
+        if not variant.is_active:
+            raise ValidationError(
+                "This product is not available."
+            )
+
+        # Make sure the product is approved
+        if product.status != Products.Status.APPROVED:
+            raise ValidationError(
+                "This product is not available."
+            )
+
+        # Check inventory
+        inventory = Inventory.objects.get(
+            variant=variant
+        )
+
+        if inventory.available_quantity <= 0:
+            raise ValidationError(
+                "This product is out of stock."
+            )
+
+        # Check if this product/variant is already in cart
+        cart_item = CartItem.objects.filter(
+            cart=cart,
+            variant=variant,
+        ).first()
+
+        if cart_item:
+            raise ValidationError(
+                "Product already in cart"
+            )
+
+        # Create the new-format cart item
+        cart_item = CartItem.objects.create(
+            cart=cart,
+            user=self.request.user,
+            product=product,
+            variant=variant,
+            quantity=1,
+            unit_price=variant.price,
+        )
+
         serializer.instance = cart_item
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context['request'] = self.request
         return context
-
-
 class RemoveFromCartView(DestroyAPIView):
     serializer_class = CartItemSerializer
     permission_classes = [IsAuthenticated]
