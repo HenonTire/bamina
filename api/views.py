@@ -1,19 +1,27 @@
 from django.shortcuts import render
+from decimal import Decimal
+from uuid import uuid4
+
 from .models import *
 from .serializer import *
+
 from rest_framework.generics import *
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
+from rest_framework import status
+
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+
 from rest_framework.exceptions import ValidationError
-from .utils import send_fcm_notification
 from rest_framework.exceptions import NotFound
-from django.shortcuts import get_object_or_404
-from rest_framework import status
+
+from .utils import send_fcm_notification
+
 from manager.models import ShopOwner
 from manager.permission import IsSeller
+
 from .services import (
     add_to_cart,
     checkout,
@@ -28,7 +36,6 @@ from .services import (
     transition_product,
     update_cart_item,
 )
-
 
 class ListProducts(ListAPIView):
     serializer_class = ProductSerializer
@@ -251,86 +258,64 @@ class RemoveFromCartView(DestroyAPIView):
         cart_item.delete()
         return Response({"detail": "Product removed from cart"}, status=status.HTTP_204_NO_CONTENT)
 
-
 class PlaceOrderView(CreateAPIView):
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
     queryset = Order.objects.all()
 
-    def perform_create(self, serializer):
-        request = self.request
-        shop_id = self.kwargs.get('shop_id')
-
+    def create(self, request, *args, **kwargs):
         shipping_address_id = request.data.get("shipping_address_id")
+
         if shipping_address_id:
             shipping_address = get_object_or_404(
-                Adress, id=shipping_address_id, user=request.user)
+                Adress,
+                id=shipping_address_id,
+                user=request.user,
+            )
         else:
-            legacy_address = request.data.get('shipping_address')
+            legacy_address = request.data.get("shipping_address")
+
             if not legacy_address:
-                raise ValidationError("Shipping address is required")
-            shipping_address = Adress.objects.create(
-                user=request.user, address=legacy_address)
-
-        # Validate shop
-        shop = get_object_or_404(Shop, shope_id=shop_id)
-
-        # Get cart items for user and shop
-        cart_items = CartItem.objects.filter(
-            user=request.user, product__shop=shop)
-        if not cart_items.exists():
-            raise ValidationError("Your cart is empty")
-
-        # Prepare current cart products + quantities dict
-        cart_products = {}
-        for item in cart_items:
-            cart_products[item.product.id] = item.quantity
-
-        # Check if active order with same products and quantities exists
-        active_orders = Order.objects.filter(
-            user=request.user, shop=shop, status=OrderStatus.IN_PROCESS)
-        for order in active_orders:
-            order_items = order.items.all()  # assuming related_name='items' for OrderItem FK
-            order_products = {oi.product.id: oi.quantity for oi in order_items}
-
-            if order_products == cart_products:
                 raise ValidationError(
-                    "An active order with these products already exists")
+                    "Shipping address is required"
+                )
 
-        total_price = sum(item.get_total_price() for item in cart_items)
-        order = serializer.save(
-            user=request.user, total=total_price, shop=shop, status=OrderStatus.IN_PROCESS, shipping_address=shipping_address)
-
-        for item in cart_items:
-            OrderItem.objects.create(
-                order=order,
-                product=item.product,
-                quantity=item.quantity,
-                price=item.product.price,
+            shipping_address = Adress.objects.create(
+                user=request.user,
+                address=legacy_address,
             )
 
-            item.product.is_sold_out = True
-            item.product.save()
+        # Keep compatibility with the old frontend.
+        # The frontend may not send an idempotency key.
+        idempotency_key = (
+            request.data.get("idempotency_key")
+            or str(uuid4())
+        )
 
-        # Clear the cart after order placed
-        CartItem.objects.filter(
-            user=request.user, product__shop=shop).delete()
+        delivery_fee = request.data.get(
+            "delivery_fee",
+            Decimal("100"),
+        )
 
-        # Send notification if token provided
-        shop_owner = ShopOwner.objects.filter(shop=shop).first()
-        if shop_owner:
-            try:
-                data = send_fcm_notification(
-                    user=shop_owner.user,
-                    shop=shop,
-                    title="🛒 New Order Placed",
-                    body=f"{request.user.username} just placed an order in your shop."
-                )
-                print(data)
-            except Exception as e:
-                print("Failed to send FCM:", e)
+        notes = request.data.get(
+            "notes",
+            "",
+        )
 
-        return order
+        order = checkout(
+            user=request.user,
+            shipping_address=shipping_address,
+            idempotency_key=idempotency_key,
+            delivery_fee=delivery_fee,
+            notes=notes,
+        )
+
+        serializer = self.get_serializer(order)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class ListCartView(ListAPIView):
