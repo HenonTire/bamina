@@ -44,8 +44,18 @@ class ListProducts(ListAPIView):
 
     def get_queryset(self):
         shop_id = self.kwargs.get('shop_id')
-        return Products.objects.filter(shop__shope_id=shop_id).order_by('-created_at')
 
+        return (
+            Products.objects.filter(
+                shop__shope_id=shop_id,
+                status=Products.Status.APPROVED,
+                variants__is_active=True,
+                variants__inventory__quantity_available__gt=0,
+            )
+            .prefetch_related('variants__inventory')
+            .distinct()
+            .order_by('-created_at')
+        )
 
 class DetailProduct(RetrieveUpdateDestroyAPIView):
     serializer_class = ProductSerializer
