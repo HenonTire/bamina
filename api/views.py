@@ -37,6 +37,9 @@ from .services import (
     update_cart_item,
 )
 
+from django.db.models import F, Q, ExpressionWrapper
+from django.db.models.fields import IntegerField
+
 class ListProducts(ListAPIView):
     serializer_class = ProductSerializer
     # we don't need users to be authenticated cause we want non-logged in users to access shop products
@@ -50,7 +53,16 @@ class ListProducts(ListAPIView):
                 shop__shope_id=shop_id,
                 status=Products.Status.APPROVED,
                 variants__is_active=True,
-                variants__inventory__quantity_available__gt=0,
+            )
+            .annotate(
+                available_stock=ExpressionWrapper(
+                    F('variants__inventory__quantity_available')
+                    - F('variants__inventory__quantity_reserved'),
+                    output_field=IntegerField(),
+                )
+            )
+            .filter(
+                available_stock__gt=0,
             )
             .prefetch_related('variants__inventory')
             .distinct()
