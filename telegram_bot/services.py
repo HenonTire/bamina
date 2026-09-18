@@ -73,6 +73,7 @@ def notify_admins(title, body):
             title=title,
             body=body,
         )
+        
 def notify_order_parties(order):
     """
     Notify admins and sellers about a newly created order.
@@ -263,6 +264,7 @@ def notify_order_parties(order):
                 seller.id,
                 order.order_number,
             )
+
 def notify_admins_order_status(order, action):
     """
     Notify all active staff Telegram accounts when a seller

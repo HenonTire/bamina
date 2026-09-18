@@ -39,11 +39,33 @@ def generate_unique_sku():
             return sku
 
 def _notify_order_parties_after_commit(order_id):
+    import logging
+
+    from api.models import Order
     from telegram_bot.services import notify_order_parties
 
-    order = Order.objects.get(pk=order_id)
-    notify_order_parties(order)
+    logger = logging.getLogger(__name__)
 
+    try:
+        order = Order.objects.get(pk=order_id)
+
+        logger.info(
+            'Sending Telegram order notifications for order %s',
+            order.order_number or order.id,
+        )
+
+        notify_order_parties(order)
+
+        logger.info(
+            'Telegram order notifications sent for order %s',
+            order.order_number or order.id,
+        )
+
+    except Exception:
+        logger.exception(
+            'Failed to send Telegram order notifications for order %s',
+            order_id,
+        )
 
 def get_or_create_variant(product, variant=None):
     if variant is not None:

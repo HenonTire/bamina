@@ -132,20 +132,17 @@ def _callback(chat_id, callback_id, text=''):
 
 SHOP_PAGE_SIZE = 8
 
-
 def _available_products():
     return (
         Products.objects.filter(
             status=Products.Status.APPROVED,
-            is_sold_out=False,
             variants__is_active=True,
+            variants__inventory__quantity_available__gt=0,
         )
-        .prefetch_related('variants')
+        .prefetch_related('variants__inventory')
         .distinct()
         .order_by('-created_at', '-id')
     )
-
-
 def _show_shop(chat_id, page=0):
     products = list(_available_products()[page * SHOP_PAGE_SIZE:(page + 1) * SHOP_PAGE_SIZE + 1])
     has_next = len(products) > SHOP_PAGE_SIZE
