@@ -13,6 +13,7 @@ from .keyboards import (
     admin_processing_order_actions,
     admin_ready_order_actions,
     seller_order_actions,
+    admin_owned_order_actions,
 )
 from api.models import Adress, CartItem, Notification, Order, ProductVariant, Products, Settlement
 from api.services import marketplace_shop
@@ -158,11 +159,27 @@ def notify_order_parties(order):
             order.notes,
         ])
 
-    admin_lines.extend([
-        '',
-        '<b>⏳ WAITING FOR SELLER</b>',
-        'The seller must accept or reject this order before admin processing.',
-    ])
+    has_seller = any(
+    item.seller_id is not None
+    for item in items
+)
+
+    if has_seller:
+        admin_lines.extend([
+            '',
+            '<b>⏳ WAITING FOR SELLER</b>',
+            'The seller must accept or reject this order before admin processing.',
+        ])
+        admin_markup = admin_order_actions(order.id)
+
+    else:
+        admin_lines.extend([
+            '',
+            '<b>⚡ ACTION REQUIRED</b>',
+            'This order contains Beminet-owned products.',
+            'Admin can accept or reject this order.',
+        ])
+        admin_markup = admin_owned_order_actions(order.id)
 
     admin_message = '\n'.join(admin_lines)
 
@@ -176,7 +193,7 @@ def notify_order_parties(order):
             client.send_message(
         account.telegram_user_id,
         admin_message,
-        admin_order_actions(order.id),
+        admin_markup,
     )
         except Exception:
             logger.exception(

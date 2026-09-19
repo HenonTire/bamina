@@ -71,6 +71,27 @@ def admin_order_actions(order_id):
             ],
         ]
     }
+def admin_owned_order_actions(order_id):
+    return {
+        'inline_keyboard': [
+            [
+                button(
+                    '✅ Accept Order',
+                    f'admin_order_accept:{order_id}',
+                ),
+                button(
+                    '❌ Reject Order',
+                    f'admin_order_reject:{order_id}',
+                ),
+            ],
+            [
+                button(
+                    '📋 View Order',
+                    f'admin_order:{order_id}',
+                ),
+            ],
+        ]
+    }
 def admin_confirmed_order_actions(order_id):
     return {
         'inline_keyboard': [
@@ -148,6 +169,7 @@ def seller_order_actions(order_id):
             ],
         ]
     }
+
 def admin_out_for_delivery_actions(order_id):
     return {
         'inline_keyboard': [
