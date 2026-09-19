@@ -2357,7 +2357,137 @@ def _handle_callback(
             chat_id,
             'Enter the new positive quantity.',
         )
+        # ---------------------------------------------------------
+    # ADMIN — ACCEPT BEMINET-OWNED ORDER
+    # ---------------------------------------------------------
+    elif data.startswith('admin_order_accept:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to accept orders.',
+            )
+            return
 
+        order_id = int(
+            data.split(':', 1)[1]
+        )
+
+        order = (
+            Order.objects
+            .filter(pk=order_id)
+            .first()
+        )
+
+        if not order:
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
+            return
+
+        if order.status != OrderStatus.PENDING:
+            _send(
+                chat_id,
+                f'⚠️ This order is already '
+                f'<b>{order.status}</b>.',
+            )
+            return
+
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.CONFIRMED,
+            )
+
+        except ValidationError as exc:
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
+            return
+
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
+
+        _send(
+            chat_id,
+            f'✅ <b>Order Accepted</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>',
+            admin_confirmed_order_actions(
+                order.id
+            ),
+        )
+
+    # ---------------------------------------------------------
+    # ADMIN — REJECT BEMINET-OWNED ORDER
+    # ---------------------------------------------------------
+    elif data.startswith('admin_order_reject:'):
+        if not account.user.is_staff:
+            _send(
+                chat_id,
+                '❌ You are not authorized to reject orders.',
+            )
+            return
+
+        order_id = int(
+            data.split(':', 1)[1]
+        )
+
+        order = (
+            Order.objects
+            .filter(pk=order_id)
+            .first()
+        )
+
+        if not order:
+            _send(
+                chat_id,
+                '❌ That order was not found.',
+            )
+            return
+
+        if order.status != OrderStatus.PENDING:
+            _send(
+                chat_id,
+                f'⚠️ This order is already '
+                f'<b>{order.status}</b>.',
+            )
+            return
+
+        try:
+            order = transition_order(
+                order,
+                OrderStatus.CANCELLED,
+            )
+
+        except ValidationError as exc:
+            _send(
+                chat_id,
+                safe_error(exc),
+            )
+            return
+
+        if message_id:
+            _remove_buttons(
+                chat_id,
+                message_id,
+            )
+
+        _send(
+            chat_id,
+            f'❌ <b>Order Rejected</b>\n\n'
+            f'Order: #{order.order_number}\n'
+            f'Status: <b>{order.status}</b>\n\n'
+            'Reserved stock has been released.',
+        )
+
+    # ---------------------------------------------------------
+    # ADMIN — START PROCESSING
+    # ---------------------------------------------------------
     elif data.startswith('cartremove:'):
         try:
             remove_cart_item(
@@ -2386,6 +2516,7 @@ def _handle_callback(
             chat_id,
             order_id,
         )
+
 def process_update(update):
     telegram_user, chat_id, text = _user_from_update(update)
     if not telegram_user or chat_id is None:
