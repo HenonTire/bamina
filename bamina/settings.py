@@ -1,37 +1,32 @@
-from dotenv import load_dotenv
-import dj_database_url
-from datetime import timedelta
-from firebase_admin import credentials
-import firebase_admin
 import os
-from pathlib import Path
-from environ import Env
-from django.core.exceptions import ImproperlyConfigured
+import firebase_admin
 
+from pathlib import Path
+from datetime import timedelta
+from dotenv import load_dotenv
+from firebase_admin import credentials
+from django.core.exceptions import ImproperlyConfigured
+import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-env = Env()
-env.read_env(Path(__file__).resolve().parent / ".env")
+# Environment
+load_dotenv(BASE_DIR / "bamina" / ".env")
+
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise ImproperlyConfigured("SECRET_KEY is missing.")
+
+DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+
+ALLOWED_HOSTS = os.getenv(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1"
+).split(",")
 
 
-SECRET_KEY = env("SECRET_KEY")
-
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = False
-
-ALLOWED_HOSTS = ["bamina.onrender.com"]
-
-if DEBUG:
-    ALLOWED_HOSTS += ["localhost"]
-
-
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
-STATIC_URL = "/static/"
-STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
-
-
-# Application definition
+# Applications
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -39,29 +34,25 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "api",
+
     "rest_framework",
-    "user",
-    "rest_framework.authtoken",
+    "rest_framework_simplejwt",
     "rest_framework_simplejwt.token_blacklist",
-    "manager",
-    "telegram_bot",
+
     "corsheaders",
-    "debug_toolbar",
     "cloudinary",
     "cloudinary_storage",
+
+    # V02 apps will be added here.
+    "user",
 ]
 
-INTERNAL_IPS = [
-    "127.0.0.1",
-]
 
-
+# Middleware
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    "debug_toolbar.middleware.DebugToolbarMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -73,6 +64,11 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = "bamina.urls"
 
+WSGI_APPLICATION = "bamina.wsgi.application"
+ASGI_APPLICATION = "bamina.asgi.application"
+
+
+# Templates
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -89,8 +85,6 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "bamina.wsgi.application"
-
 
 # Database
 if DEBUG:
@@ -103,59 +97,37 @@ if DEBUG:
 else:
     DATABASES = {
         "default": dj_database_url.config(
-            default=os.getenv("DATABASE_URL")
+            default=os.getenv("DATABASE_URL"),
+            conn_max_age=600,
         )
     }
+
+
+# Custom user model
+AUTH_USER_MODEL = "user.User"
 
 
 # Password validation
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "UserAttributeSimilarityValidator"
-        ),
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "MinimumLengthValidator"
-        ),
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "CommonPasswordValidator"
-        ),
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        "NAME": (
-            "django.contrib.auth.password_validation."
-            "NumericPasswordValidator"
-        ),
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
 
-# Internationalization
-LANGUAGE_CODE = "en-us"
-TIME_ZONE = "UTC"
-USE_I18N = True
-USE_TZ = True
-
-
-# Default primary key field type
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-
-
-# Authentication
-AUTH_USER_MODEL = "user.User"
-
-
+# Django REST Framework
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
-        "rest_framework.authentication.SessionAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
@@ -163,61 +135,55 @@ REST_FRAMEWORK = {
 }
 
 
+# JWT
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=30),
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+}
+
+
+# Static files
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+
+# Media / Cloudinary
+CLOUDINARY = {
+    "CLOUD_NAME": os.getenv("CLOUDINARY_CLOUD_NAME"),
+    "API_KEY": os.getenv("CLOUDINARY_API_KEY"),
+    "API_SECRET": os.getenv("CLOUDINARY_API_SECRET"),
+}
+
+
 # Firebase
-def get_firebase_credential_path():
-    """
-    Resolve Firebase credentials securely.
+FIREBASE_CRED_PATH = os.getenv("FIREBASE_CRED_PATH")
 
-    Priority:
-    1. FIREBASE_CRED_PATH environment variable
-    2. Render Secret File path
-    3. Local development credential path
-    """
-    configured_path = os.getenv("FIREBASE_CRED_PATH")
+if FIREBASE_CRED_PATH:
+    firebase_path = Path(FIREBASE_CRED_PATH)
+else:
+    firebase_path = BASE_DIR / "firebase-credentials.json"
 
-    local_path = (
-        BASE_DIR
-        / "api"
-        / "credentials"
-        / "bamina-store-1879c-firebase-adminsdk-fbsvc-de2f419517.json"
-    )
-
-    render_secret_path = Path(
-        "/etc/secrets/"
-        "bamina-store-1879c-firebase-adminsdk-fbsvc-de2f419517.json"
-    )
-
-    # Explicit environment configuration always wins.
-    if configured_path:
-        credential_path = Path(configured_path)
-
-        if not credential_path.is_file():
-            raise ImproperlyConfigured(
-                "Firebase credential file configured by "
-                f"FIREBASE_CRED_PATH was not found: {credential_path}"
-            )
-
-        return str(credential_path)
-
-    # Render Secret File.
-    if render_secret_path.is_file():
-        return str(render_secret_path)
-
-    # Local development fallback.
-    if local_path.is_file():
-        return str(local_path)
-
-    raise ImproperlyConfigured(
-        "Firebase credential file was not found. Checked: "
-        f"{render_secret_path} and {local_path}"
-    )
-
-
-FIREBASE_CRED_PATH = get_firebase_credential_path()
-
-if not firebase_admin._apps:
-    cred = credentials.Certificate(FIREBASE_CRED_PATH)
-    firebase_admin.initialize_app(cred)
+if firebase_path.is_file():
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(str(firebase_path))
+        firebase_admin.initialize_app(cred)
+else:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "Firebase credentials were not found."
+        )
 
 
 # CORS
@@ -226,56 +192,44 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5500",
     "http://127.0.0.1:5501",
     "http://localhost:5501",
-    "https://bamina.vercel.app",
-    "https://bami-ecommerce.vercel.app"
+    "https://bami-ecommerce.vercel.app",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
 
-CORS_ALLOW_HEADERS = [
-    "authorization",
-    "content-type",
-]
 
-
-# JWT
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(hours=72),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=60),
-    "AUTH_HEADER_TYPES": ("Bearer",),
-    "BLACKLIST_AFTER_ROTATION": False,
-    "ROTATE_REFRESH_TOKENS": False,
-}
-
-
-# Email settings
+# Email
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
 EMAIL_HOST = "smtp.gmail.com"
 EMAIL_PORT = 587
 EMAIL_USE_TLS = True
-EMAIL_HOST_USER = env("EMAIL_HOST_USER")
-EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD")
-DEFAULT_FROM_EMAIL = "Bamina Team <baminateam@gmail.com>"
 
-
-# Google OAuth
-GOOGLE_CLIENT_ID = env("GOOGLE_CLIENT_ID")
-
-
-# Cloudinary / Media
-CLOUDINARY = {
-    "CLOUD_NAME": env("CLOUDINARY_CLOUD_NAME"),
-    "API_KEY": env("CLOUDINARY_API_KEY"),
-    "API_SECRET": env("CLOUDINARY_API_SECRET"),
-}
-
-DEFAULT_FILE_STORAGE = "cloudinary_storage.storage.MediaCloudinaryStorage"
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    "Bami Commerce <baminateam@gmail.com>",
+)
 
 
 # Telegram
-TELEGRAM_BOT_TOKEN = env("TELEGRAM_BOT_TOKEN", default="")
-TELEGRAM_BOT_USERNAME = env("TELEGRAM_BOT_USERNAME", default="")
-TELEGRAM_WEBHOOK_SECRET = env("TELEGRAM_WEBHOOK_SECRET", default="")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+
+
+# Internationalization
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "Africa/Addis_Ababa"
+USE_I18N = True
+USE_TZ = True
+
+
+# Default primary key
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# Logging
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -287,12 +241,5 @@ LOGGING = {
     "root": {
         "handlers": ["console"],
         "level": "INFO",
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console"],
-            "level": "ERROR",
-            "propagate": False,
-        },
     },
 }
