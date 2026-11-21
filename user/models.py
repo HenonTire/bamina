@@ -1,6 +1,3 @@
-from django.db import models
-
-# Create your models here.
 import hashlib
 import hmac
 import uuid
@@ -154,6 +151,7 @@ class Customer(models.Model):
         editable=False,
     )
 
+    # null for guests who ordered without an account
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -179,6 +177,7 @@ class Customer(models.Model):
         blank=True,
     )
 
+    # True only after the OPTIONAL Telegram link
     is_verified = models.BooleanField(default=False)
 
     verification_method = models.CharField(
@@ -203,14 +202,14 @@ class Customer(models.Model):
 
 
 # =========================================================
-# TELEGRAM VERIFICATION
+# TELEGRAM CHALLENGE (optional link + password reset)
 # =========================================================
 
 class TelegramVerificationChallenge(models.Model):
 
     class Purpose(models.TextChoices):
-        BUYER = "buyer", "Buyer Verification"
-        SELLER = "seller", "Seller Verification"
+        LINK = "link", "Link Telegram"
+        RESET = "reset", "Password reset"
 
     id = models.UUIDField(
         primary_key=True,
@@ -230,11 +229,28 @@ class TelegramVerificationChallenge(models.Model):
         choices=Purpose.choices,
     )
 
+    payload = models.JSONField(default=dict, blank=True)
+
+    telegram_user_id = models.CharField(max_length=100, blank=True)
+    telegram_chat_id = models.CharField(max_length=100, blank=True)
+
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    attempts = models.PositiveSmallIntegerField(default=0)
+
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+
     expires_at = models.DateTimeField()
 
+    # True once the challenge has been used (tokens exchanged / code spent)
     is_used = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["phone", "created_at"]),
+        ]
 
     def is_expired(self):
         return timezone.now() >= self.expires_at
@@ -267,11 +283,6 @@ class SellerProfile(models.Model):
         related_name="seller_profile",
     )
 
-    phone = models.CharField(
-        max_length=13,
-        unique=True,
-    )
-
     business_name = models.CharField(max_length=200)
 
     status = models.CharField(
@@ -280,6 +291,7 @@ class SellerProfile(models.Model):
         default=Status.PENDING,
     )
 
+    # "Telegram linked" (informational). Admin approval is the real gate.
     is_phone_verified = models.BooleanField(default=False)
 
     approved_at = models.DateTimeField(
@@ -289,6 +301,10 @@ class SellerProfile(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def phone(self):
+        return self.user.phone
 
     def __str__(self):
         return self.business_name

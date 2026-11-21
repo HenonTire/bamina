@@ -6,7 +6,7 @@ from .models import SellerProfile
 class IsApprovedSeller(BasePermission):
     """
     Allows access only to authenticated sellers
-    whose accounts have been approved.
+    whose accounts have been approved by Bami admin.
     """
 
     message = "Your seller account has not been approved yet."
@@ -25,7 +25,6 @@ class IsApprovedSeller(BasePermission):
         return (
             user.is_active
             and seller.status == SellerProfile.Status.APPROVED
-            and seller.is_phone_verified
         )
 
 

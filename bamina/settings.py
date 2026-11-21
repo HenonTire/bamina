@@ -18,12 +18,14 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise ImproperlyConfigured("SECRET_KEY is missing.")
 
-DEBUG = os.getenv("DEBUG", "True").lower() == "true"
+# Safe default: production stays OFF unless DEBUG=True is set (local .env only).
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = os.getenv(
-    "ALLOWED_HOSTS",
-    "localhost,127.0.0.1"
-).split(",")
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if h.strip()
+]
 
 
 # Applications
@@ -43,7 +45,7 @@ INSTALLED_APPS = [
     "cloudinary",
     "cloudinary_storage",
 
-    # V02 apps will be added here.
+    # V02 apps
     "user",
 ]
 
@@ -87,7 +89,15 @@ TEMPLATES = [
 
 
 # Database
-if DEBUG:
+# Local dev:  DATABASE_URL=postgresql://user:pass@localhost:5432/bami_v02
+# Production: DATABASE_URL = Supabase URL (set on Render only)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.parse(DATABASE_URL, conn_max_age=600),
+    }
+elif DEBUG:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -95,31 +105,31 @@ if DEBUG:
         }
     }
 else:
-    DATABASES = {
-        "default": dj_database_url.config(
-            default=os.getenv("DATABASE_URL"),
-            conn_max_age=600,
-        )
+    raise ImproperlyConfigured("DATABASE_URL is missing.")
+
+
+# Cache (used for the failed-login lock).
+# Database cache is shared between workers. Run once: python manage.py createcachetable
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "django_cache",
     }
+}
 
 
 # Custom user model
 AUTH_USER_MODEL = "user.User"
 
 
-# Password validation
+# Password validation (kept light on purpose: login lock protects weak passwords)
 AUTH_PASSWORD_VALIDATORS = [
     {
-        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
-    },
-    {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 6},
     },
     {
         "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
-    },
-    {
-        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -132,6 +142,17 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "register": "10/hour",
+        "login": "30/hour",
+        "reset": "10/hour",
+        "link_poll": "120/hour",
+    },
+    # Render adds one proxy. Stops X-Forwarded-For spoofing.
+    "NUM_PROXIES": 0 if DEBUG else 1,
 }
 
 
@@ -167,7 +188,7 @@ CLOUDINARY = {
 }
 
 
-# Firebase
+# Firebase (optional until notifications are built in v02)
 FIREBASE_CRED_PATH = os.getenv("FIREBASE_CRED_PATH")
 
 if FIREBASE_CRED_PATH:
@@ -179,11 +200,8 @@ if firebase_path.is_file():
     if not firebase_admin._apps:
         cred = credentials.Certificate(str(firebase_path))
         firebase_admin.initialize_app(cred)
-else:
-    if not DEBUG:
-        raise ImproperlyConfigured(
-            "Firebase credentials were not found."
-        )
+elif os.getenv("USE_FIREBASE", "False").lower() == "true":
+    raise ImproperlyConfigured("Firebase credentials were not found.")
 
 
 # CORS
@@ -196,6 +214,14 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+
+
+# Production security (Render terminates HTTPS in front of Django)
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    CSRF_TRUSTED_ORIGINS = ["https://bamina.onrender.com"]
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 
 # Email
@@ -216,6 +242,9 @@ DEFAULT_FROM_EMAIL = os.getenv(
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_USERNAME = os.getenv("TELEGRAM_BOT_USERNAME", "")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+
+if not DEBUG and not TELEGRAM_WEBHOOK_SECRET:
+    raise ImproperlyConfigured("TELEGRAM_WEBHOOK_SECRET is missing.")
 
 
 # Internationalization
