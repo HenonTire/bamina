@@ -47,6 +47,8 @@ INSTALLED_APPS = [
 
     # V02 apps
     "user",
+    "catalog",
+    "orders",
 ]
 
 
@@ -150,7 +152,11 @@ REST_FRAMEWORK = {
         "login": "30/hour",
         "reset": "10/hour",
         "link_poll": "120/hour",
+        "order_create": "20/hour",
+        "track": "60/hour",
     },
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
     # Render adds one proxy. Stops X-Forwarded-For spoofing.
     "NUM_PROXIES": 0 if DEBUG else 1,
 }
